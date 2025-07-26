@@ -1,0 +1,26 @@
+[package]
+name        = "arrancador"
+version     = "0.1.0"
+edition     = "2021"
+description = "A Tauri App"
+authors     = ["you"]
+
+[lib]
+name       = "arrancador_lib"   # не трогаем
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+# ─────────────────────────────────────────
+# Зависимости, собираемые ПЕРЕД билдом Tauri
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+# ─────────────────────────────────────────
+# Основные зависимости приложения
+[dependencies]
+tauri                = { version = "2", features = [] }
+tauri-plugin-opener  = "2"
+tauri-plugin-dialog  = "2"
+serde                = { version = "1", features = ["derive"] }
+serde_json           = "1"
+jwalk                = "0.8"
+rayon                = "1.8"
