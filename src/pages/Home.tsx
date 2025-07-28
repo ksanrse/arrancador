@@ -1,21 +1,25 @@
-import { useScan } from "@/hooks/useScan";
-import { FileList } from "@/components/FileList";
-import { ScanButton } from "@/components/ScanButton";
-import { ProgressBar } from "@/components/ProgressBar";
-import { ModeToggle } from "@/components/mode-toggle";
+import { useFavs } from "@/store/FavoritesContext";
+import { Card, CardContent } from "@/components/ui/card";
+import { openPath } from "@tauri-apps/plugin-opener";
 
 export default function Home() {
-  const { files, prog, busy, start } = useScan();
+  const { keeps } = useFavs();
+
+  if (keeps.length === 0) {
+    return <p className="text-muted-foreground">Нет избранных игр. Отметьте их ⭐ в Search.</p>;
+  }
 
   return (
-    <div className="p-8 space-y-4">
-      <div className="absolute top-4 right-4">
-        <ModeToggle />
-      </div>
-
-      <ScanButton busy={busy} onClick={start} />
-      <ProgressBar v={prog} />
-      <FileList items={files} />
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {keeps.map((exe) => (
+        <Card
+          key={exe.path}
+          className="cursor-pointer hover:bg-secondary transition"
+          onClick={() => openPath(exe.path).catch(console.error)}
+        >
+          <CardContent className="p-4">{exe.file_name}</CardContent>
+        </Card>
+      ))}
     </div>
   );
 }
