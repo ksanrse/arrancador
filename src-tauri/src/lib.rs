@@ -1,5 +1,5 @@
 mod scan;
-use scan::scan_executables_stream;
+use scan::{scan_executables_stream, cancel_scan};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -13,7 +13,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             greet,
-            scan_executables_stream
+            scan_executables_stream,
+            cancel_scan
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

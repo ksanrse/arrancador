@@ -30,17 +30,23 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
+    console.log("Setting up event listeners.");
     // при каждом scan:entry отбрасываем дубликаты
-    const off1 = listen<ExeEntry>("scan:entry", ({ payload }) =>
+    const off1 = listen<ExeEntry>("scan:entry", ({ payload }) => {
+      console.log("scan:entry received:", payload.file_name);
       setFiles((prev) => {
         if (prev.some((e) => e.path === payload.path)) {
           return prev;
         }
         return [...prev, payload];
-      })
-    );
-    const off2 = listen<number>("scan:progress", (e) => setProgress(e.payload));
+      });
+    });
+    const off2 = listen<number>("scan:progress", (e) => {
+      console.log("scan:progress received:", e.payload);
+      setProgress(e.payload);
+    });
     const off3 = listen("scan:done", () => {
+      console.log("scan:done received.");
       setProgress(1);
       setBusy(false);
     });
@@ -53,13 +59,22 @@ export function ScanProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const startScan = useCallback(async () => {
-    if (busy) await emit("scan:cancel");
+    console.log("startScan called. busy:", busy);
+    if (busy) {
+      console.log("Scan already busy, invoking cancel_scan.");
+      await invoke("cancel_scan");
+    }
     const dir = await openDialog({ directory: true });
-    if (!dir || Array.isArray(dir)) return;
+    console.log("openDialog returned:", dir);
+    if (!dir || Array.isArray(dir)) {
+      console.log("No directory selected or invalid directory.");
+      return;
+    }
 
     setFiles([]);
     setProgress(0);
     setBusy(true);
+    console.log("Invoking scan_executables_stream with dir:", dir);
     invoke("scan_executables_stream", { dir });
   }, [busy]);
 
