@@ -109,12 +109,20 @@ fn update_games_cache(cache: &mut Vec<GameInfo>) {
 
 fn update_playtime(game_ids: &[String]) {
     let now = Utc::now().to_rfc3339();
+    let today = Utc::now().date_naive().format("%Y-%m-%d").to_string();
+    let increment = UPDATE_INTERVAL_SECS as i64;
     let _ = with_db(|conn| {
         for id in game_ids {
             // Add seconds to total_playtime and update last_played
             conn.execute(
                 "UPDATE games SET total_playtime = total_playtime + ?1, last_played = ?2 WHERE id = ?3",
-                params![UPDATE_INTERVAL_SECS as i64, now, id],
+                params![increment, now, id],
+            )?;
+            conn.execute(
+                "INSERT INTO playtime_daily (game_id, date, seconds)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(game_id, date) DO UPDATE SET seconds = seconds + excluded.seconds",
+                params![id, today, increment],
             )?;
         }
         Ok(())
