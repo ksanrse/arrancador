@@ -64,6 +64,51 @@ const formatDateLong = (value: string) => {
 const formatGameName = (name: string) =>
   name.length > 20 ? `${name.slice(0, 18)}\u2026` : name;
 
+const formatMonthValue = (year: number, month: number) =>
+  `${year}-${String(month).padStart(2, "0")}`;
+
+const getMonthRange = (value: string) => {
+  const [yearValue, monthValue] = value.split("-");
+  const year = Number(yearValue);
+  const month = Number(monthValue);
+
+  if (!year || !month) {
+    return null;
+  }
+
+  const start = toIsoDate(new Date(year, month - 1, 1));
+  const end = toIsoDate(new Date(year, month, 0));
+
+  return { start, end };
+};
+
+const getMonthValueFromRange = (start: string, end: string) => {
+  const startParts = start.split("-").map(Number);
+  const endParts = end.split("-").map(Number);
+
+  if (startParts.length !== 3 || endParts.length !== 3) {
+    return "";
+  }
+
+  const [startYear, startMonth, startDay] = startParts;
+  const [endYear, endMonth, endDay] = endParts;
+
+  if (!startYear || !startMonth || !startDay || !endYear || !endMonth || !endDay) {
+    return "";
+  }
+
+  if (startYear !== endYear || startMonth !== endMonth || startDay !== 1) {
+    return "";
+  }
+
+  const lastDay = new Date(startYear, startMonth, 0).getDate();
+  if (endDay !== lastDay) {
+    return "";
+  }
+
+  return formatMonthValue(startYear, startMonth);
+};
+
 const rangePresets = [
   { id: "7d", label: `7 \u0434\u043d\u0435\u0439`, days: 7 },
   { id: "30d", label: `30 \u0434\u043d\u0435\u0439`, days: 30 },
@@ -160,6 +205,10 @@ export default function Statistics() {
   const hasDailyData = (stats?.total_seconds ?? 0) > 0;
   const hasPerGameData = perGameData.length > 0;
   const hasMoreGames = stats && stats.per_game_totals.length > perGameData.length;
+  const selectedMonthValue = useMemo(
+    () => getMonthValueFromRange(startDate, endDate),
+    [startDate, endDate]
+  );
 
   const handlePresetClick = (days: number, presetId: string) => {
     const now = new Date();
@@ -168,6 +217,17 @@ export default function Statistics() {
     setRangePreset(presetId);
     setStartDate(nextStart);
     setEndDate(nextEnd);
+  };
+
+  const handleMonthChange = (value: string) => {
+    const range = getMonthRange(value);
+    if (!range) {
+      return;
+    }
+
+    setRangePreset("month");
+    setStartDate(range.start);
+    setEndDate(range.end);
   };
 
   const handleStartDateChange = (value: string) => {
@@ -249,7 +309,17 @@ export default function Statistics() {
               </Button>
             ))}
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="space-y-1">
+              <span className="text-xs text-muted-foreground">
+                {"\u041c\u0435\u0441\u044f\u0446"}
+              </span>
+              <Input
+                type="month"
+                value={selectedMonthValue}
+                onChange={(event) => handleMonthChange(event.target.value)}
+              />
+            </div>
             <div className="space-y-1">
               <span className="text-xs text-muted-foreground">
                 {"\u0421"}
