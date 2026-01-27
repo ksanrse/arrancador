@@ -18,7 +18,8 @@ Do not make assumptions on important decisions — get clarification first.
 
 ## Workflow Steps
 
-### [ ] Step: Technical Specification
+### [x] Step: Technical Specification
+<!-- chat-id: 7f2b6e6a-254d-4de0-ae2d-567141a88cb8 -->
 
 Assess the task's difficulty, as underestimating it leads to poor outcomes.
 - easy: Straightforward implementation, trivial bug fix or feature
@@ -50,15 +51,14 @@ Save to `{@artifacts_path}/plan.md`. If the feature is trivial and doesn't warra
 
 ---
 
-### [ ] Step: Implementation
+### [ ] Step: Sidebar stability + UX refresh
+Update `src/components/Sidebar.tsx` (and layout styles) to lock width, reduce jitter, and polish nav styling. Verify by navigating between pages and toggling collapse.
 
-Implement the task according to the technical specification and general engineering best practices.
+### [ ] Step: Playtime aggregation + stats API
+Add `playtime_daily` storage, tracker updates, and a stats command in Rust; expose it in `src/lib/api.ts`. Verify with `cargo test` or manual DB checks.
 
-1. Break the task into steps where possible.
-2. Implement the required changes in the codebase.
-3. Add and run relevant tests and linters.
-4. Perform basic manual verification if applicable.
-5. After completion, write a report to `{@artifacts_path}/report.md` describing:
-   - What was implemented
-   - How the solution was tested
-   - The biggest issues or challenges encountered
+### [ ] Step: Statistics charts refresh
+Replace the existing chart with monthly totals + per-game breakdown (month selector) in `src/pages/Statistics.tsx`. Verify chart readability and data binding.
+
+### [ ] Step: Verification + report
+Run available tests (`pnpm test`, `cargo test`) and write `{@artifacts_path}/report.md` with implementation notes.
