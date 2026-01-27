@@ -1,4 +1,5 @@
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import {
   Activity,
@@ -74,6 +75,9 @@ export default function GameDetail() {
   const [loadingBackups, setLoadingBackups] = useState(false);
   const [creatingBackup, setCreatingBackup] = useState(false);
   const [showBackupPrompt, setShowBackupPrompt] = useState(false);
+  const [savePathDraft, setSavePathDraft] = useState("");
+  const [savingSavePath, setSavingSavePath] = useState(false);
+  const [locatingSavePath, setLocatingSavePath] = useState(false);
 
   const [showAllBackups, setShowAllBackups] = useState(false);
   const [showRestorePrompt, setShowRestorePrompt] = useState(false);
@@ -99,6 +103,9 @@ export default function GameDetail() {
 
   const latestBackup = backups[0];
   const olderBackups = backups.slice(1);
+  const savePathValue = savePathDraft.trim();
+  const savedPath = game?.save_path ?? "";
+  const savePathDirty = savePathValue !== savedPath;
   const ratingLevels = [
     { value: 1, label: "1", desc: "Ужасно, играть невозможно" },
     { value: 2, label: "2", desc: "Плохо, много проблем" },
@@ -158,6 +165,9 @@ export default function GameDetail() {
   useEffect(() => {
     const found = games.find((g) => g.id === id);
     if (found) {
+      const isSameGame = game?.id === found.id;
+      const currentSavedPath = game?.save_path ?? "";
+      const draftTrimmed = savePathDraft.trim();
       setGame(found);
       // Initialize edit form
       setEditForm({
@@ -167,6 +177,9 @@ export default function GameDetail() {
       });
       setUserRating(found.user_rating ?? null);
       setUserNote(found.user_note || "");
+      if (!isSameGame || draftTrimmed === currentSavedPath) {
+        setSavePathDraft(found.save_path || "");
+      }
     }
   }, [id, games]);
 
@@ -483,6 +496,70 @@ export default function GameDetail() {
       await refreshGames();
     } catch (e) {
       console.error("Failed to update backup setting:", e);
+    }
+  };
+
+  const handleSelectSavePath = async () => {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: "\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043f\u0430\u043f\u043a\u0443 \u0441 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f\u043c\u0438",
+    });
+
+    if (selected) {
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      if (path) {
+        setSavePathDraft(path);
+      }
+    }
+  };
+
+  const handleOpenSavePath = async () => {
+    if (!savePathValue) return;
+    try {
+      await openPath(savePathValue);
+    } catch (e) {
+      console.error("Failed to open save path:", e);
+    }
+  };
+
+  const handleLocateSavePath = async () => {
+    if (!game) return;
+    setLocatingSavePath(true);
+    try {
+      const info = await backupApi.findGameSaves(game.name, game.id);
+      if (info?.save_path) {
+        setSavePathDraft(info.save_path);
+      } else {
+        alert(
+          "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043d\u0430\u0439\u0442\u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f. \u0423\u043a\u0430\u0436\u0438\u0442\u0435 \u043f\u0443\u0442\u044c \u0432\u0440\u0443\u0447\u043d\u0443\u044e.",
+        );
+      }
+    } catch (e) {
+      console.error("Failed to locate saves:", e);
+      alert(
+        "\u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u043f\u043e\u0438\u0441\u043a\u0435 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0439.",
+      );
+    } finally {
+      setLocatingSavePath(false);
+    }
+  };
+
+  const handleSaveSavePath = async () => {
+    if (!game) return;
+    setSavingSavePath(true);
+    try {
+      const normalizedPath = savePathValue;
+      await gamesApi.update({
+        id: game.id,
+        save_path: normalizedPath === "" ? null : normalizedPath,
+      });
+      setSavePathDraft(normalizedPath);
+      await refreshGames();
+    } catch (e) {
+      console.error("Failed to update save path:", e);
+    } finally {
+      setSavingSavePath(false);
     }
   };
 
@@ -873,6 +950,85 @@ export default function GameDetail() {
                     />
                   </Button>{" "}
                 </div>
+              </div>
+
+              <div className="rounded-xl border border-border/60 bg-secondary/40 p-3 mb-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {"\u041f\u0443\u0442\u044c \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0439"}
+                  </div>
+                  <span
+                    className={cn(
+                      "text-[10px] uppercase tracking-wider",
+                      game.save_path
+                        ? "text-emerald-400"
+                        : "text-muted-foreground",
+                    )}
+                  >
+                    {game.save_path
+                      ? "\u041d\u0430\u0441\u0442\u0440\u043e\u0435\u043d"
+                      : "\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e"}
+                  </span>
+                </div>
+                <div className="flex gap-2">
+                  <Input
+                    value={savePathDraft}
+                    onChange={(event) => setSavePathDraft(event.target.value)}
+                    placeholder={
+                      "\u041f\u0443\u0442\u044c \u043a \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f\u043c"
+                    }
+                    className="flex-1 text-xs"
+                  />
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleSelectSavePath}
+                    title="\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043f\u0430\u043f\u043a\u0443"
+                  >
+                    <FolderOpen className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    onClick={handleOpenSavePath}
+                    disabled={!savePathValue}
+                    title="\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043f\u0430\u043f\u043a\u0443"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </Button>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleLocateSavePath}
+                    disabled={locatingSavePath}
+                    className="text-xs"
+                  >
+                    {locatingSavePath ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Search className="w-3 h-3" />
+                    )}
+                    {"\u041d\u0430\u0439\u0442\u0438"}
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={handleSaveSavePath}
+                    disabled={savingSavePath || !savePathDirty}
+                    className="text-xs"
+                  >
+                    {savingSavePath ? (
+                      <Loader2 className="w-3 h-3 animate-spin" />
+                    ) : (
+                      <Save className="w-3 h-3" />
+                    )}
+                    {"\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c"}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {"\u0415\u0441\u043b\u0438 \u043f\u0443\u0442\u044c \u043f\u0443\u0441\u0442\u043e\u0439, SQOBA \u043f\u043e\u043f\u044b\u0442\u0430\u0435\u0442\u0441\u044f \u043d\u0430\u0439\u0442\u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f \u043f\u0440\u0438 \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0435\u043c \u0431\u044d\u043a\u0430\u043f\u0435."}
+                </p>
               </div>
 
               {loadingBackups ? (

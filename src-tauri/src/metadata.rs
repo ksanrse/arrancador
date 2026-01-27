@@ -234,7 +234,7 @@ pub async fn apply_rawg_metadata(
             "SELECT id, name, exe_path, exe_name, rawg_id, description, released,
              background_image, metacritic, rating, genres, platforms, developers, publishers,
              cover_image, is_favorite, play_count, total_playtime, last_played, date_added,
-             backup_enabled, last_backup, backup_count, user_rating, user_note
+             backup_enabled, last_backup, backup_count, save_path, user_rating, user_note
              FROM games WHERE id = ?1",
         )?;
 
@@ -263,8 +263,9 @@ pub async fn apply_rawg_metadata(
                 backup_enabled: row.get::<_, i32>(20)? == 1,
                 last_backup: row.get(21)?,
                 backup_count: row.get(22)?,
-                user_rating: row.get(23)?,
-                user_note: row.get(24)?,
+                save_path: row.get(23)?,
+                user_rating: row.get(24)?,
+                user_note: row.get(25)?,
             })
         })
     })

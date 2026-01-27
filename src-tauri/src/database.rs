@@ -51,6 +51,7 @@ pub fn init_database() -> Result<()> {
             backup_enabled INTEGER DEFAULT 0,
             last_backup TEXT,
             backup_count INTEGER DEFAULT 0,
+            save_path TEXT,
 
             -- User rating
             user_rating INTEGER,
@@ -120,7 +121,10 @@ pub fn init_database() -> Result<()> {
         ("ludusavi_path", ""),
         ("backup_directory", ""),
         ("auto_backup", "true"),
-        ("backup_before_launch", "true"),
+        ("backup_before_launch", "false"),
+        ("backup_compression_enabled", "true"),
+        ("backup_compression_level", "60"),
+        ("backup_skip_compression_once", "false"),
         ("max_backups_per_game", "5"),
         ("theme", "system"),
     ];
@@ -154,6 +158,9 @@ fn ensure_game_columns(conn: &Connection) -> Result<()> {
     }
     if !cols.contains("user_note") {
         conn.execute("ALTER TABLE games ADD COLUMN user_note TEXT", [])?;
+    }
+    if !cols.contains("save_path") {
+        conn.execute("ALTER TABLE games ADD COLUMN save_path TEXT", [])?;
     }
 
     Ok(())
