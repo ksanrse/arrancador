@@ -31,6 +31,10 @@ use windows::Win32::System::Ioctl::{
 // Import our new native engine
 #[path = "backup/engine.rs"]
 pub mod engine;
+#[path = "backup/save_locator.rs"]
+pub mod save_locator;
+#[path = "backup/sqoba_manifest.rs"]
+pub mod sqoba_manifest;
 use engine::BackupEngine;
 use engine::BackupProgress;
 

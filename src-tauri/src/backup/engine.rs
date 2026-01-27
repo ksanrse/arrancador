@@ -1,38 +1,30 @@
-use serde::{Deserialize, Serialize};
-use serde_yaml::Value as YamlValue;
-use std::collections::HashMap;
-use std::collections::HashSet;
-use std::fs::{self, File};
-use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
-use zip::ZipArchive;
-use regex::Regex;
+use crate::backup::save_locator::locate_game_saves;
+use crate::backup::sqoba_manifest::{SqobaGame, SqobaManifest};
 use rayon::prelude::*;
+use regex::Regex;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs::{self, File};
+use std::io::{BufWriter, Read, Seek, Write};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-
-// --- Manifest Structures ---
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct Manifest {
-    pub games: HashMap<String, GameManifest>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct GameManifest {
-    pub files: Option<HashMap<String, Vec<String>>>, // <Tag, Paths>
-    pub registry: Option<Vec<String>>,
-}
+use std::time::{SystemTime, UNIX_EPOCH};
+use zip::write::{FileOptions, ZipWriter};
+use zip::{CompressionMethod, ZipArchive};
 
 // --- Backup Archive Manifest ---
 
-const BACKUP_MANIFEST_NAME: &str = "__arrancador_manifest.json";
-const BACKUP_README_NAME: &str = "__arrancador_readme.txt";
+const SQOBA_MANIFEST_NAME: &str = "__sqoba_manifest.json";
+const SQOBA_README_NAME: &str = "__sqoba_readme.txt";
+const LEGACY_MANIFEST_NAME: &str = "__arrancador_manifest.json";
+const BACKUP_MANIFEST_NAMES: [&str; 2] = [SQOBA_MANIFEST_NAME, LEGACY_MANIFEST_NAME];
+const MANIFEST_VERSION: u32 = 2;
 const LUDUSAVI_MAPPING_NAME: &str = "mapping.yaml";
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct BackupArchiveManifest {
+    #[serde(default)]
     pub version: u32,
     pub files: Vec<BackupFileEntry>,
 }
@@ -43,6 +35,8 @@ pub struct BackupFileEntry {
     pub backup_path: String,
     pub original_path: String,
     pub size: u64,
+    #[serde(default)]
+    pub mtime: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +45,37 @@ pub struct BackupProgress {
     pub current: String,
     pub done: usize,
     pub total: usize,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum BackupMode {
+    Directory,
+    Zip { level: u8 },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct BackupOptions {
+    pub mode: BackupMode,
+}
+
+impl BackupOptions {
+    pub fn directory() -> Self {
+        Self {
+            mode: BackupMode::Directory,
+        }
+    }
+
+    pub fn zip(level: u8) -> Self {
+        Self {
+            mode: BackupMode::Zip { level },
+        }
+    }
+}
+
+impl Default for BackupOptions {
+    fn default() -> Self {
+        Self::directory()
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -84,7 +109,7 @@ pub struct LudusaviRegistry {
 // --- Engine Implementation ---
 
 pub struct BackupEngine {
-    manifest: Option<Manifest>,
+    manifest: Option<SqobaManifest>,
 }
 
 impl BackupEngine {
@@ -92,165 +117,34 @@ impl BackupEngine {
         Self { manifest: None }
     }
 
-    /// Loads the manifest from cache or downloads it
     pub fn load_manifest(&mut self) -> Result<(), String> {
-        let cache_path = dirs::data_local_dir()
-            .unwrap_or(PathBuf::from("."))
-            .join("arrancador")
-            .join("manifest.json");
-
-        // Try load from cache
-        if cache_path.exists() {
-            if let Ok(file) = File::open(&cache_path) {
-                let reader = std::io::BufReader::new(file);
-                if let Ok(m) = serde_json::from_reader(reader) {
-                    self.manifest = Some(m);
-                    return Ok(());
-                }
-            }
-        }
-
-        // Download YAML if missing or failed
-        println!("Downloading Ludusavi manifest...");
-        let client = reqwest::blocking::Client::new();
-        let resp = client
-            .get("https://raw.githubusercontent.com/mtkennerly/ludusavi-manifest/master/data/manifest.yaml")
-            .header("User-Agent", "Arrancador/0.1.0")
-            .send()
-            .map_err(|e| e.to_string())?;
-
-        let text = if resp.status().is_success() {
-            resp.text().map_err(|e| e.to_string())?
-        } else {
-            let status = resp.status();
-            let body = resp.text().unwrap_or_else(|_| "<no body>".to_string());
-            return Err(format!(
-                "Failed to download manifest: {} - {}",
-                status, body
-            ));
-        };
-
-        let manifest = match manifest_from_yaml(&text) {
-            Ok(m) => m,
-            Err(e) => {
-                // Fallback to local manifest for dev builds
-                let candidates = [
-                    PathBuf::from("example")
-                        .join("ludusavi-manifest-master")
-                        .join("data")
-                        .join("manifest.yaml"),
-                    PathBuf::from("example")
-                        .join("ludusavi-manifest")
-                        .join("data")
-                        .join("manifest.yaml"),
-                ];
-                let mut loaded: Option<Manifest> = None;
-                for local in candidates {
-                    if local.exists() {
-                        let local_text =
-                            fs::read_to_string(&local).map_err(|e2| e2.to_string())?;
-                        let parsed = manifest_from_yaml(&local_text)
-                            .map_err(|e2| format!("Failed to parse local manifest: {}", e2))?;
-                        loaded = Some(parsed);
-                        break;
-                    }
-                }
-                if let Some(m) = loaded {
-                    m
-                } else {
-                    return Err(format!("Failed to parse manifest: {}", e));
-                }
-            }
-        };
-
-        // Save to cache
-        if let Some(parent) = cache_path.parent() {
-            fs::create_dir_all(parent).ok();
-        }
-        let mut file = File::create(&cache_path).map_err(|e| e.to_string())?;
-        let json = serde_json::to_vec(&manifest).map_err(|e| e.to_string())?;
-        file.write_all(&json).map_err(|e| e.to_string())?;
-
-        self.manifest = Some(manifest);
+        self.manifest = crate::backup::sqoba_manifest::load_manifest_optional()?;
         Ok(())
     }
 
-    pub fn find_game_entry(&self, name: &str) -> Option<GameManifest> {
+    pub fn find_game_entry(&self, name: &str) -> Option<SqobaGame> {
         self.find_game_entry_with_key(name).map(|(_, entry)| entry)
     }
 
-    fn find_game_entry_with_key(&self, name: &str) -> Option<(String, GameManifest)> {
+    fn find_game_entry_with_key(&self, name: &str) -> Option<(String, SqobaGame)> {
         let manifest = self.manifest.as_ref()?;
-        if let Some(entry) = manifest.games.get(name) {
-            return Some((name.to_string(), entry.clone()));
-        }
-
-        let normalized = normalize_name(name);
-        let mut best: Option<(String, f32)> = None;
-
-        for (key, entry) in &manifest.games {
-            let key_norm = normalize_name(key);
-            if key_norm == normalized {
-                return Some((key.clone(), entry.clone()));
-            }
-
-            let score = similarity_score(&normalized, &key_norm);
-            if best.as_ref().map(|b| score > b.1).unwrap_or(true) {
-                best = Some((key.clone(), score));
-            }
-        }
-
-        if let Some((best_key, best_score)) = best {
-            if best_score >= 0.6 {
-                return manifest
-                    .games
-                    .get(&best_key)
-                    .cloned()
-                    .map(|entry| (best_key, entry));
-            }
-        }
-
-        None
+        manifest.find_game_entry(name)
     }
 
     /// Finds save files for a game without backing them up
     pub fn find_game_files(&self, name: &str) -> Result<Option<(Vec<PathBuf>, u64)>, String> {
-        let game_entry = match self.find_game_entry(name) {
-            Some(entry) => entry,
-            None => return Ok(None),
+        let discovery = locate_game_saves(name, self.manifest.as_ref(), None)?;
+        let Some(discovery) = discovery else {
+            return Ok(None);
         };
 
-        let mut files = Vec::new();
-        let mut total_size = 0;
+        let files = discovery
+            .files
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect();
 
-        if let Some(files_map) = game_entry.files {
-            for (_, paths) in files_map {
-                for raw_path in paths {
-                    let resolved = self.resolve_path(&raw_path);
-                    for path in resolved {
-                        if path.is_file() {
-                            if let Ok(meta) = fs::metadata(&path) {
-                                total_size += meta.len();
-                                files.push(path);
-                            }
-                        } else if path.is_dir() {
-                            for entry in WalkDir::new(&path).into_iter().filter_map(|e| e.ok()) {
-                                if entry.file_type().is_file() {
-                                    total_size += entry.metadata().map(|m| m.len()).unwrap_or(0);
-                                    files.push(entry.path().to_path_buf());
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if files.is_empty() {
-            return Ok(None);
-        }
-
-        Ok(Some((files, total_size)))
+        Ok(Some((files, discovery.total_size)))
     }
 
     pub fn backup_game(&self, name: &str, destination: &Path) -> Result<u64, String> {
@@ -273,112 +167,84 @@ impl BackupEngine {
         threads: usize,
         progress: Option<Arc<dyn Fn(BackupProgress) + Send + Sync>>,
     ) -> Result<u64, String> {
-        let (matched_name, game_entry) = self
-            .find_game_entry_with_key(name)
-            .ok_or_else(|| {
+        self.backup_game_with_options_and_progress(
+            name,
+            destination,
+            threads,
+            BackupOptions::default(),
+            progress,
+        )
+    }
+
+    pub fn backup_game_with_options(
+        &self,
+        name: &str,
+        destination: &Path,
+        options: BackupOptions,
+    ) -> Result<u64, String> {
+        self.backup_game_with_options_and_progress(name, destination, 4, options, None)
+    }
+
+    pub fn backup_game_with_threads_and_options(
+        &self,
+        name: &str,
+        destination: &Path,
+        threads: usize,
+        options: BackupOptions,
+    ) -> Result<u64, String> {
+        self.backup_game_with_options_and_progress(name, destination, threads, options, None)
+    }
+
+    pub fn backup_game_with_options_and_progress(
+        &self,
+        name: &str,
+        destination: &Path,
+        threads: usize,
+        options: BackupOptions,
+        progress: Option<Arc<dyn Fn(BackupProgress) + Send + Sync>>,
+    ) -> Result<u64, String> {
+        let matched_name = self.find_game_entry_with_key(name).map(|(key, _)| key);
+        let discovery = locate_game_saves(name, self.manifest.as_ref(), None)?;
+        let discovery = match discovery {
+            Some(discovery) => discovery,
+            None => {
                 let suggestions = self.suggest_games(name, 5);
                 if suggestions.is_empty() {
-                    format!("Game '{}' not found in manifest", name)
-                } else {
-                    format!(
-                        "Game '{}' not found in manifest. Closest matches: {}",
-                        name,
-                        suggestions.join(", ")
-                    )
+                    return Err(format!("No save data found for '{}'", name));
                 }
-            })?;
-
-        fs::create_dir_all(destination).map_err(|e| e.to_string())?;
-
-        let mut file_list: Vec<(PathBuf, String)> = Vec::new();
-        let mut seen: HashSet<PathBuf> = HashSet::new();
-        let mut root_index = 0usize;
-        // 1. Process Files
-        if let Some(files_map) = game_entry.files {
-            for (_, paths) in files_map {
-                for raw_path in paths {
-                    let resolved = self.resolve_path(&raw_path);
-                    for path in resolved {
-                        let root_label = format!("root-{}", root_index);
-                        root_index += 1;
-                        if path.is_file() {
-                            let file_name = path
-                                .file_name()
-                                .map(|n| n.to_string_lossy().to_string())
-                                .unwrap_or_else(|| "file".to_string());
-                            let rel_path = PathBuf::from(file_name);
-                            let backup_rel = build_backup_rel_path(&root_label, &rel_path);
-                            if seen.insert(path.clone()) {
-                                file_list.push((path, backup_rel));
-                            }
-                        } else if path.is_dir() {
-                            for entry in WalkDir::new(&path).into_iter().filter_map(|e| e.ok()) {
-                                if entry.file_type().is_file() {
-                                    let rel_path = entry
-                                        .path()
-                                        .strip_prefix(&path)
-                                        .unwrap_or(entry.path())
-                                        .to_path_buf();
-                                    let backup_rel = build_backup_rel_path(&root_label, &rel_path);
-                                    let entry_path = entry.path().to_path_buf();
-                                    if seen.insert(entry_path.clone()) {
-                                        file_list.push((entry_path, backup_rel));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                return Err(format!(
+                    "No save data found for '{}'. Closest matches: {}",
+                    name,
+                    suggestions.join(", ")
+                ));
             }
-        }
+        };
 
-        let thread_pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(threads.max(1))
-            .build()
-            .map_err(|e| e.to_string())?;
+        let file_list: Vec<BackupSourceFile> = discovery
+            .files
+            .iter()
+            .map(|entry| BackupSourceFile {
+                path: entry.path.clone(),
+                backup_path: build_backup_rel_path(&entry.root_label, &entry.relative_path),
+            })
+            .collect();
 
-        let total = file_list.len();
-        let counter = AtomicUsize::new(0);
-        let progress_ref = progress.clone();
+        let total_bytes = match options.mode {
+            BackupMode::Directory => self.backup_to_directory(
+                destination,
+                &file_list,
+                threads,
+                progress,
+            )?,
+            BackupMode::Zip { level } => {
+                self.backup_to_zip(destination, &file_list, level, progress)?
+            }
+        };
 
-        let results: Vec<Result<BackupFileEntry, String>> = thread_pool.install(|| {
-            file_list
-                .par_iter()
-                .map(|(path, backup_path)| {
-                    let size = self.copy_file_to_backup(destination, path, backup_path)?;
-                    let done = counter.fetch_add(1, Ordering::SeqCst) + 1;
-                    if let Some(cb) = &progress_ref {
-                        if done == total || done % 50 == 0 {
-                            cb(BackupProgress {
-                                stage: "copy",
-                                current: path.to_string_lossy().to_string(),
-                                done,
-                                total,
-                            });
-                        }
-                    }
-                    Ok(BackupFileEntry {
-                        backup_path: backup_path.clone(),
-                        original_path: path.to_string_lossy().to_string(),
-                        size,
-                    })
-                })
-                .collect()
-        });
-
-        let mut entries: Vec<BackupFileEntry> = Vec::new();
-        let mut total_bytes = 0;
-        for r in results {
-            let entry = r?;
-            total_bytes += entry.size;
-            entries.push(entry);
-        }
-
-        self.write_manifest_to_dir(destination, &entries)?;
-        self.write_readme_to_dir(destination)?;
-
-        if matched_name != name {
-            println!("Backup matched '{}' to manifest entry '{}'", name, matched_name);
+        if let Some(matched_name) = matched_name {
+            if matched_name != name {
+                println!("Backup matched '{}' to manifest entry '{}'", name, matched_name);
+            }
         }
 
         Ok(total_bytes)
@@ -403,13 +269,7 @@ impl BackupEngine {
         progress: Option<Arc<dyn Fn(BackupProgress) + Send + Sync>>,
     ) -> Result<(), String> {
         if backup_path.is_dir() {
-            let manifest_path = backup_path.join(BACKUP_MANIFEST_NAME);
-            if manifest_path.exists() {
-                let manifest_text =
-                    fs::read_to_string(&manifest_path).map_err(|e| e.to_string())?;
-                let manifest: BackupArchiveManifest =
-                    serde_json::from_str(&manifest_text).map_err(|e| e.to_string())?;
-
+            if let Some(manifest) = read_manifest_from_dir(backup_path)? {
                 let items: Vec<(PathBuf, PathBuf)> = manifest
                     .files
                     .into_iter()
@@ -472,16 +332,8 @@ impl BackupEngine {
         let file = File::open(backup_path).map_err(|e| e.to_string())?;
         let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
 
-        let manifest: BackupArchiveManifest = {
-            let mut manifest_file = archive
-                .by_name(BACKUP_MANIFEST_NAME)
-                .map_err(|_| "Backup manifest missing in archive".to_string())?;
-            let mut manifest_buf = String::new();
-            manifest_file
-                .read_to_string(&mut manifest_buf)
-                .map_err(|e| e.to_string())?;
-            serde_json::from_str(&manifest_buf).map_err(|e| e.to_string())?
-        };
+        let manifest = read_manifest_from_zip(&mut archive)?
+            .ok_or_else(|| "Backup manifest missing in archive".to_string())?;
 
         for entry in manifest.files {
             let mut zipped = archive
@@ -500,80 +352,127 @@ impl BackupEngine {
         Ok(())
     }
 
-    // --- Path Resolution Logic ---
+    fn backup_to_directory(
+        &self,
+        destination: &Path,
+        files: &[BackupSourceFile],
+        threads: usize,
+        progress: Option<Arc<dyn Fn(BackupProgress) + Send + Sync>>,
+    ) -> Result<u64, String> {
+        fs::create_dir_all(destination).map_err(|e| e.to_string())?;
 
-    fn resolve_path(&self, raw_path: &str) -> Vec<PathBuf> {
-        let mut base_path = raw_path.to_string();
-        let mut candidates = Vec::new();
+        let thread_pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(threads.max(1))
+            .build()
+            .map_err(|e| e.to_string())?;
 
-        // 1. Replacements
-        if let Some(dirs) = dirs::home_dir() {
-            base_path = base_path.replace("<home>", dirs.to_str().unwrap());
-        }
-        if let Some(docs) = dirs::document_dir() {
-            base_path = base_path.replace("<winDocuments>", docs.to_str().unwrap());
-            base_path = base_path.replace("<documents>", docs.to_str().unwrap());
-        }
-        if let Some(data) = dirs::data_dir() {
-            base_path = base_path.replace("<winAppData>", data.to_str().unwrap());
-        }
-        if let Some(local) = dirs::data_local_dir() {
-            base_path = base_path.replace("<winLocalAppData>", local.to_str().unwrap());
+        let total = files.len();
+        let counter = AtomicUsize::new(0);
+        let progress_ref = progress.clone();
+
+        let results: Vec<Result<BackupFileEntry, String>> = thread_pool.install(|| {
+            files
+                .par_iter()
+                .map(|file| {
+                    let size = self.copy_file_to_backup(destination, &file.path, &file.backup_path)?;
+                    let done = counter.fetch_add(1, Ordering::SeqCst) + 1;
+                    if let Some(cb) = &progress_ref {
+                        if done == total || done % 50 == 0 {
+                            cb(BackupProgress {
+                                stage: "copy",
+                                current: file.path.to_string_lossy().to_string(),
+                                done,
+                                total,
+                            });
+                        }
+                    }
+                    Ok(BackupFileEntry {
+                        backup_path: file.backup_path.clone(),
+                        original_path: file.path.to_string_lossy().to_string(),
+                        size,
+                        mtime: file_mtime(&file.path),
+                    })
+                })
+                .collect()
+        });
+
+        let mut entries: Vec<BackupFileEntry> = Vec::new();
+        let mut total_bytes = 0;
+        for r in results {
+            let entry = r?;
+            total_bytes += entry.size;
+            entries.push(entry);
         }
 
-        // <steam> is harder, need to find steam path via registry or default locations
-        if base_path.contains("<steam>") {
-            if let Some(steam_path) = self.find_steam_path() {
-                base_path = base_path.replace("<steam>", steam_path.to_str().unwrap());
-            } else {
-                return vec![]; // Cannot resolve steam path
-            }
-        }
+        let manifest = build_manifest(&entries);
+        self.write_manifest_to_dir(destination, &manifest)?;
+        self.write_readme_to_dir(destination)?;
 
-        // 2. Glob expansion
-        if base_path.contains('*') || base_path.contains('?') {
-            if let Ok(paths) = glob::glob(&base_path) {
-                for p in paths.filter_map(|x| x.ok()) {
-                    candidates.push(p);
-                }
-            }
-        } else {
-            let p = PathBuf::from(&base_path);
-            if p.exists() {
-                candidates.push(p);
-            }
-        }
-
-        candidates
+        Ok(total_bytes)
     }
 
-    fn find_steam_path(&self) -> Option<PathBuf> {
-        #[cfg(target_os = "windows")]
-        {
-            use winreg::enums::*;
-            use winreg::RegKey;
+    fn backup_to_zip(
+        &self,
+        destination: &Path,
+        files: &[BackupSourceFile],
+        level: u8,
+        progress: Option<Arc<dyn Fn(BackupProgress) + Send + Sync>>,
+    ) -> Result<u64, String> {
+        if destination.exists() && destination.is_dir() {
+            return Err("Backup destination must be a file path for archives".to_string());
+        }
 
-            let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-            if let Ok(key) = hklm.open_subkey("SOFTWARE\\Wow6432Node\\Valve\\Steam") {
-                if let Ok(path) = key.get_value::<String, _>("InstallPath") {
-                    return Some(PathBuf::from(path));
-                }
-            }
-            if let Ok(key) = hklm.open_subkey("SOFTWARE\\Valve\\Steam") {
-                if let Ok(path) = key.get_value::<String, _>("InstallPath") {
-                    return Some(PathBuf::from(path));
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+
+        let file = File::create(destination).map_err(|e| e.to_string())?;
+        let writer = BufWriter::new(file);
+        let mut archive = ZipWriter::new(writer);
+        let file_options = zip_data_options(level);
+        let total = files.len();
+
+        let mut entries: Vec<BackupFileEntry> = Vec::with_capacity(total);
+        let mut total_bytes = 0u64;
+
+        for (index, file) in files.iter().enumerate() {
+            let mut source = File::open(&file.path).map_err(|e| e.to_string())?;
+            let metadata = source.metadata().map_err(|e| e.to_string())?;
+            let size = metadata.len();
+            let mtime = metadata.modified().ok().and_then(system_time_to_epoch_seconds);
+
+            archive
+                .start_file(&file.backup_path, file_options)
+                .map_err(|e| e.to_string())?;
+            std::io::copy(&mut source, &mut archive).map_err(|e| e.to_string())?;
+
+            entries.push(BackupFileEntry {
+                backup_path: file.backup_path.clone(),
+                original_path: file.path.to_string_lossy().to_string(),
+                size,
+                mtime,
+            });
+            total_bytes += size;
+
+            let done = index + 1;
+            if let Some(cb) = &progress {
+                if done == total || done % 50 == 0 {
+                    cb(BackupProgress {
+                        stage: "copy",
+                        current: file.path.to_string_lossy().to_string(),
+                        done,
+                        total,
+                    });
                 }
             }
         }
 
-        let paths = vec!["C:\\Program Files (x86)\\Steam", "C:\\Program Files\\Steam"];
-        for p in paths {
-            let pb = PathBuf::from(p);
-            if pb.exists() {
-                return Some(pb);
-            }
-        }
-        None
+        let manifest = build_manifest(&entries);
+        self.write_manifest_to_zip(&mut archive, &manifest)?;
+        self.write_readme_to_zip(&mut archive)?;
+        archive.finish().map_err(|e| e.to_string())?;
+
+        Ok(total_bytes)
     }
 
     fn copy_file_to_backup(
@@ -593,32 +492,45 @@ impl BackupEngine {
     fn write_manifest_to_dir(
         &self,
         backup_root: &Path,
-        entries: &[BackupFileEntry],
+        manifest: &BackupArchiveManifest,
     ) -> Result<(), String> {
-        let manifest = BackupArchiveManifest {
-            version: 1,
-            files: entries.to_vec(),
-        };
-        let json = serde_json::to_vec_pretty(&manifest).map_err(|e| e.to_string())?;
-        let manifest_path = backup_root.join(BACKUP_MANIFEST_NAME);
+        let json = serde_json::to_vec_pretty(manifest).map_err(|e| e.to_string())?;
+        let manifest_path = backup_root.join(SQOBA_MANIFEST_NAME);
         fs::write(manifest_path, json).map_err(|e| e.to_string())?;
         Ok(())
     }
 
+    fn write_manifest_to_zip<W: Write + Seek>(
+        &self,
+        archive: &mut ZipWriter<W>,
+        manifest: &BackupArchiveManifest,
+    ) -> Result<(), String> {
+        let json = serde_json::to_vec_pretty(manifest).map_err(|e| e.to_string())?;
+        let options = zip_metadata_options();
+        archive
+            .start_file(SQOBA_MANIFEST_NAME, options)
+            .map_err(|e| e.to_string())?;
+        archive.write_all(&json).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     fn write_readme_to_dir(&self, backup_root: &Path) -> Result<(), String> {
-        let readme = "\
-Arrancador backup format\n\
-\n\
-This folder contains raw save files plus a manifest.\n\
-- __arrancador_manifest.json: list of files and original paths\n\
-- files/: backed up files in the same names/structure as saves\n\
-\n\
-To restore manually:\n\
-1) Open __arrancador_manifest.json\n\
-2) For each entry, copy files/<path> to original_path\n\
-";
-        let readme_path = backup_root.join(BACKUP_README_NAME);
+        let readme = backup_readme_text();
+        let readme_path = backup_root.join(SQOBA_README_NAME);
         fs::write(readme_path, readme.as_bytes()).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    fn write_readme_to_zip<W: Write + Seek>(
+        &self,
+        archive: &mut ZipWriter<W>,
+    ) -> Result<(), String> {
+        let readme = backup_readme_text();
+        let options = zip_metadata_options();
+        archive
+            .start_file(SQOBA_README_NAME, options)
+            .map_err(|e| e.to_string())?;
+        archive.write_all(readme.as_bytes()).map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -657,24 +569,95 @@ To restore manually:\n\
     }
 
     pub fn suggest_games(&self, name: &str, limit: usize) -> Vec<String> {
-        let manifest = match &self.manifest {
-            Some(m) => m,
-            None => return Vec::new(),
-        };
-        let normalized = normalize_name(name);
-        let mut scored: Vec<(String, f32)> = manifest
-            .games
-            .keys()
-            .map(|key| {
-                let score = similarity_score(&normalized, &normalize_name(key));
-                (key.clone(), score)
-            })
-            .filter(|(_, score)| *score >= 0.4)
-            .collect();
-
-        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        scored.into_iter().take(limit).map(|(k, _)| k).collect()
+        self.manifest
+            .as_ref()
+            .map(|manifest| manifest.suggest_games(name, limit))
+            .unwrap_or_default()
     }
+}
+
+#[derive(Debug, Clone)]
+struct BackupSourceFile {
+    path: PathBuf,
+    backup_path: String,
+}
+
+fn build_manifest(entries: &[BackupFileEntry]) -> BackupArchiveManifest {
+    BackupArchiveManifest {
+        version: MANIFEST_VERSION,
+        files: entries.to_vec(),
+    }
+}
+
+fn read_manifest_from_dir(backup_root: &Path) -> Result<Option<BackupArchiveManifest>, String> {
+    for name in BACKUP_MANIFEST_NAMES {
+        let manifest_path = backup_root.join(name);
+        if manifest_path.exists() {
+            let manifest_text = fs::read_to_string(manifest_path).map_err(|e| e.to_string())?;
+            let manifest = serde_json::from_str(&manifest_text).map_err(|e| e.to_string())?;
+            return Ok(Some(manifest));
+        }
+    }
+    Ok(None)
+}
+
+fn read_manifest_from_zip<R: Read + Seek>(
+    archive: &mut ZipArchive<R>,
+) -> Result<Option<BackupArchiveManifest>, String> {
+    for name in BACKUP_MANIFEST_NAMES {
+        if let Ok(mut manifest_file) = archive.by_name(name) {
+            let mut manifest_buf = String::new();
+            manifest_file
+                .read_to_string(&mut manifest_buf)
+                .map_err(|e| e.to_string())?;
+            let manifest = serde_json::from_str(&manifest_buf).map_err(|e| e.to_string())?;
+            return Ok(Some(manifest));
+        }
+    }
+    Ok(None)
+}
+
+fn backup_readme_text() -> String {
+    format!(
+        "SQOBA backup format\n\
+\n\
+This folder contains raw save files plus a manifest.\n\
+- {}: list of files and original paths\n\
+- files/: backed up files in the same names/structure as saves\n\
+\n\
+To restore manually:\n\
+1) Open {}\n\
+2) For each entry, copy files/<path> to original_path\n",
+        SQOBA_MANIFEST_NAME, SQOBA_MANIFEST_NAME
+    )
+}
+
+fn file_mtime(path: &Path) -> Option<i64> {
+    fs::metadata(path)
+        .ok()
+        .and_then(|metadata| metadata.modified().ok())
+        .and_then(system_time_to_epoch_seconds)
+}
+
+fn system_time_to_epoch_seconds(time: SystemTime) -> Option<i64> {
+    time.duration_since(UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_secs() as i64)
+}
+
+fn zip_data_options(level: u8) -> FileOptions<'static, ()> {
+    FileOptions::default()
+        .compression_method(CompressionMethod::Deflated)
+        .compression_level(Some(map_deflate_level(level)))
+}
+
+fn zip_metadata_options() -> FileOptions<'static, ()> {
+    FileOptions::default().compression_method(CompressionMethod::Stored)
+}
+
+fn map_deflate_level(level: u8) -> i64 {
+    let clamped = level.clamp(1, 100) as i64;
+    ((clamped - 1) * 8 / 99) + 1
 }
 
 fn path_from_backup_rel(rel: &str) -> PathBuf {
@@ -716,130 +699,10 @@ fn build_backup_rel_path(root: &str, relative: &Path) -> String {
     format!("files/{}/{}", root, rel)
 }
 
-fn normalize_name(name: &str) -> String {
-    let lower = name.to_lowercase();
-    let re = Regex::new(r"[^a-z0-9]+").unwrap();
-    let cleaned = re.replace_all(&lower, " ");
-    let stop_words = [
-        "the", "a", "an", "edition", "definitive", "remastered", "goty", "game", "of", "year",
-        "ultimate", "complete", "collection", "bundle", "deluxe", "enhanced", "hd",
-    ];
-    let tokens: Vec<&str> = cleaned
-        .split_whitespace()
-        .filter(|t| !stop_words.contains(t))
-        .collect();
-    tokens.join(" ")
-}
-
-fn similarity_score(a: &str, b: &str) -> f32 {
-    if a.is_empty() || b.is_empty() {
-        return 0.0;
-    }
-    if a == b {
-        return 1.0;
-    }
-    if a.contains(b) || b.contains(a) {
-        return 0.9;
-    }
-    let set_a: HashSet<&str> = a.split_whitespace().collect();
-    let set_b: HashSet<&str> = b.split_whitespace().collect();
-    if set_a.is_empty() || set_b.is_empty() {
-        return 0.0;
-    }
-    let inter = set_a.intersection(&set_b).count() as f32;
-    let union = set_a.union(&set_b).count() as f32;
-    inter / union
-}
-
-fn manifest_from_yaml(text: &str) -> Result<Manifest, String> {
-    let root: YamlValue = serde_yaml::from_str(text).map_err(|e| e.to_string())?;
-    let mapping = root
-        .as_mapping()
-        .ok_or_else(|| "Invalid manifest format".to_string())?;
-
-    let mut games: HashMap<String, GameManifest> = HashMap::new();
-
-    for (game_name, game_val) in mapping {
-        let name = match game_name.as_str() {
-            Some(n) => n.to_string(),
-            None => continue,
-        };
-
-        let mut files_map: HashMap<String, Vec<String>> = HashMap::new();
-        if let Some(files) = game_val.as_mapping().and_then(|m| m.get(&YamlValue::from("files"))).and_then(|v| v.as_mapping()) {
-            for (path_key, meta_val) in files {
-                let path = match path_key.as_str() {
-                    Some(p) => p.to_string(),
-                    None => continue,
-                };
-                if !is_path_applicable(meta_val) {
-                    continue;
-                }
-                let tags = extract_tags(meta_val);
-                for tag in tags {
-                    files_map.entry(tag).or_default().push(path.clone());
-                }
-            }
-        }
-
-        let game_manifest = GameManifest {
-            files: if files_map.is_empty() { None } else { Some(files_map) },
-            registry: None,
-        };
-        games.insert(name, game_manifest);
-    }
-
-    Ok(Manifest { games })
-}
-
-fn extract_tags(meta: &YamlValue) -> Vec<String> {
-    if let Some(tags) = meta
-        .as_mapping()
-        .and_then(|m| m.get(&YamlValue::from("tags")))
-        .and_then(|v| v.as_sequence())
-    {
-        let mut out = Vec::new();
-        for t in tags {
-            if let Some(s) = t.as_str() {
-                out.push(s.to_string());
-            }
-        }
-        if !out.is_empty() {
-            return out;
-        }
-    }
-    vec!["save".to_string()]
-}
-
-fn is_path_applicable(meta: &YamlValue) -> bool {
-    let when = meta
-        .as_mapping()
-        .and_then(|m| m.get(&YamlValue::from("when")))
-        .and_then(|v| v.as_sequence());
-    if when.is_none() {
-        return true;
-    }
-
-    for cond in when.unwrap() {
-        if let Some(map) = cond.as_mapping() {
-            if let Some(os_val) = map.get(&YamlValue::from("os")).and_then(|v| v.as_str()) {
-                let os = os_val.to_lowercase();
-                if os == "windows" || os == "win" {
-                    return true;
-                } else {
-                    continue;
-                }
-            } else {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backup::sqoba_manifest::{SqobaGame, SqobaManifest};
     use std::collections::HashMap;
     use tempfile::tempdir;
 
@@ -868,14 +731,14 @@ mod tests {
         let mut games = HashMap::new();
         games.insert(
             "Test Game".to_string(),
-            GameManifest {
+            SqobaGame {
                 files: Some(files),
                 registry: None,
             },
         );
 
         let engine = BackupEngine {
-            manifest: Some(Manifest { games }),
+            manifest: Some(SqobaManifest { games }),
         };
 
         let backup_path = dir.path().join("backup");
@@ -884,10 +747,10 @@ mod tests {
             .expect("backup");
 
         assert!(total_size > 0);
-        assert!(backup_path.join(BACKUP_MANIFEST_NAME).exists());
-        assert!(backup_path.join(BACKUP_README_NAME).exists());
+        assert!(backup_path.join(SQOBA_MANIFEST_NAME).exists());
+        assert!(backup_path.join(SQOBA_README_NAME).exists());
 
-        let manifest_text = fs::read_to_string(backup_path.join(BACKUP_MANIFEST_NAME))
+        let manifest_text = fs::read_to_string(backup_path.join(SQOBA_MANIFEST_NAME))
             .expect("read manifest");
         let manifest: BackupArchiveManifest =
             serde_json::from_str(&manifest_text).expect("parse manifest");
@@ -895,6 +758,66 @@ mod tests {
         for entry in manifest.files {
             assert!(entry.backup_path.starts_with("files/root-"));
         }
+
+        fs::remove_file(&file_a).expect("remove file_a");
+        fs::remove_file(&file_b).expect("remove file_b");
+
+        engine.restore_backup(&backup_path).expect("restore");
+
+        let restored_a = fs::read(&file_a).expect("read restored a");
+        let restored_b = fs::read(&file_b).expect("read restored b");
+
+        assert_eq!(restored_a, b"alpha");
+        assert_eq!(restored_b, b"beta");
+    }
+
+    #[test]
+    fn zip_backup_and_restore_roundtrip() {
+        let dir = tempdir().expect("tempdir");
+        let save_dir = dir.path().join("saves");
+        let nested_dir = save_dir.join("sub");
+        fs::create_dir_all(&nested_dir).expect("mkdirs");
+
+        let file_a = save_dir.join("save1.txt");
+        let file_b = nested_dir.join("save2.bin");
+
+        fs::write(&file_a, b"alpha").expect("write file_a");
+        fs::write(&file_b, b"beta").expect("write file_b");
+
+        let mut files = HashMap::new();
+        files.insert(
+            "root".to_string(),
+            vec![
+                file_a.to_string_lossy().to_string(),
+                save_dir.to_string_lossy().to_string(),
+            ],
+        );
+
+        let mut games = HashMap::new();
+        games.insert(
+            "Test Game".to_string(),
+            SqobaGame {
+                files: Some(files),
+                registry: None,
+            },
+        );
+
+        let engine = BackupEngine {
+            manifest: Some(SqobaManifest { games }),
+        };
+
+        let backup_path = dir.path().join("backup.sqoba.zip");
+        let total_size = engine
+            .backup_game_with_threads_and_options(
+                "Test Game",
+                &backup_path,
+                2,
+                BackupOptions::zip(60),
+            )
+            .expect("backup");
+
+        assert!(total_size > 0);
+        assert!(backup_path.exists());
 
         fs::remove_file(&file_a).expect("remove file_a");
         fs::remove_file(&file_b).expect("remove file_b");
