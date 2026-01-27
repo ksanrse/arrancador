@@ -1,6 +1,4 @@
 import { ThemeProvider } from "@/components/theme-provider";
-import { FavoritesProvider } from "@/store/FavoritesContext";
-import { ScanProvider } from "@/store/ScanContext"; // ← импортируем
 
 export default function AppProviders({
   children,
@@ -8,10 +6,8 @@ export default function AppProviders({
   children: React.ReactNode;
 }) {
   return (
-    <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-      <FavoritesProvider>
-        <ScanProvider>{children}</ScanProvider>
-      </FavoritesProvider>
+    <ThemeProvider defaultTheme="dark" storageKey="arrancador-theme">
+      {children}
     </ThemeProvider>
   );
 }

@@ -1,10 +1,6 @@
-import Home from "@/pages/Home";
-import { ThemeProvider } from "@/components/theme-provider";
+import { RouterProvider } from "react-router-dom";
+import { router } from "@/router";
 
 export default function App() {
-  return (
-    <ThemeProvider defaultTheme="dark" storageKey="vite-ui-theme">
-      <Home />
-    </ThemeProvider>
-  );
+  return <RouterProvider router={router} />;
 }
