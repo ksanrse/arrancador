@@ -9,6 +9,7 @@ import type {
   RawgGame,
   RawgGameDetails,
   AppSettings,
+  PlaytimeStats,
 } from "@/types";
 
 // Game API
@@ -73,6 +74,11 @@ export const settingsApi = {
   addScanDirectory: (path: string) => invoke<void>("add_scan_directory", { path }),
   getScanDirectories: () => invoke<string[]>("get_scan_directories"),
   removeScanDirectory: (path: string) => invoke<void>("remove_scan_directory", { path }),
+};
+
+export const statsApi = {
+  getPlaytimeStats: (start?: string, end?: string) =>
+    invoke<PlaytimeStats>("get_playtime_stats", { start, end }),
 };
 
 import { ProcessEntry } from "@/types";

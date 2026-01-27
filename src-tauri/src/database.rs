@@ -62,6 +62,25 @@ pub fn init_database() -> Result<()> {
 
     ensure_game_columns(&conn)?;
 
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS playtime_daily (
+            game_id TEXT NOT NULL,
+            date TEXT NOT NULL,
+            seconds INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY (game_id) REFERENCES games(id) ON DELETE CASCADE,
+            UNIQUE(game_id, date)
+        )",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_playtime_daily_date ON playtime_daily(date)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_playtime_daily_game ON playtime_daily(game_id)",
+        [],
+    )?;
+
     // Backups table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS backups (

@@ -7,11 +7,13 @@ import {
   Settings,
   Star,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useGames } from "@/store/GamesContext";
 import { ModeToggle } from "./mode-toggle";
+
+const SIDEBAR_STORAGE_KEY = "arrancador_sidebar_collapsed";
 
 const navItems = [
   { title: "Библиотека", to: "/", icon: Gamepad2 },
@@ -21,30 +23,60 @@ const navItems = [
 ];
 
 export function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true";
+  });
   const { favorites } = useGames();
   const location = useLocation();
+  const sidebarWidthClass = collapsed
+    ? "lg:w-[72px] lg:min-w-[72px]"
+    : "lg:w-[260px] lg:min-w-[260px]";
+  const navItemLayoutClass = collapsed ? "lg:justify-center lg:px-2" : "lg:px-3";
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(collapsed));
+  }, [collapsed]);
 
   return (
     <aside
       className={cn(
-        "h-screen flex flex-col border-r border-border bg-sidebar transition-all duration-200 relative z-50",
-        collapsed ? "w-16" : "w-64",
-        "w-[300px] lg:w-auto", // Fixed width on mobile, auto (collapsed/expanded) on desktop
+        "h-screen flex flex-col border-r border-border/60 bg-sidebar/95 text-sidebar-foreground flex-none",
+        "supports-[backdrop-filter]:bg-sidebar/80 backdrop-blur-xl",
+        "transition-[width] duration-200 ease-out relative z-50 shadow-[0_20px_50px_rgba(8,12,24,0.2)]",
+        "w-[280px] sm:w-[320px]",
+        sidebarWidthClass,
       )}
     >
       {/* Logo */}
-      <div className="h-14 flex items-center px-4 border-b border-border">
-        {!collapsed && (
-          <span className="font-semibold text-lg tracking-tight">
-            Arrancador
-          </span>
+      <div
+        className={cn(
+          "h-14 flex items-center gap-3 border-b border-border/60 px-4",
+          collapsed && "lg:justify-center lg:gap-0 lg:px-2",
         )}
-        {collapsed && <Gamepad2 className="w-6 h-6 mx-auto" />}
+      >
+        <div
+          className={cn(
+            "flex h-9 w-9 items-center justify-center rounded-lg bg-sidebar-accent/70 text-sidebar-foreground",
+            "shadow-[0_8px_20px_rgba(8,12,24,0.18)]",
+            collapsed && "shadow-none",
+          )}
+        >
+          <Gamepad2 className="w-5 h-5" />
+        </div>
+        <span
+          className={cn(
+            "font-semibold text-base tracking-tight",
+            collapsed && "lg:sr-only",
+          )}
+        >
+          Arrancador
+        </span>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
+      <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto scrollbar-stable">
         {navItems.map(({ title, to, icon: Icon }) => {
           const isActive =
             location.pathname === to ||
@@ -54,32 +86,39 @@ export function Sidebar() {
             <NavLink
               key={to}
               to={to}
+              title={collapsed ? title : undefined}
               className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
-                "hover:bg-accent hover:text-accent-foreground",
-                isActive && "bg-accent text-accent-foreground font-medium",
+                "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors min-w-0",
+                navItemLayoutClass,
+                "text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                isActive &&
+                  "bg-sidebar-accent text-sidebar-accent-foreground shadow-[0_10px_24px_rgba(8,12,24,0.15)]",
               )}
             >
               <Icon className="w-5 h-5 flex-shrink-0" />
-              {!collapsed && <span>{title}</span>}
+              <span className={cn("truncate", collapsed && "lg:hidden")}>
+                {title}
+              </span>
             </NavLink>
           );
         })}
 
         {/* Favorites Section */}
-        {favorites.length > 0 && !collapsed && (
-          <div className="pt-4 mt-4 border-t border-border">
-            <div className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+        {favorites.length > 0 && (
+          <div className={cn("pt-4 mt-4 border-t border-border/60", collapsed && "lg:hidden")}>
+            <div className="px-3 py-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
               Избранное
             </div>
             {favorites.slice(0, 5).map((game) => (
               <NavLink
                 key={game.id}
                 to={`/game/${game.id}`}
+                title={game.name}
                 className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-md transition-colors",
-                  "hover:bg-accent hover:text-accent-foreground text-sm",
-                  location.pathname === `/game/${game.id}` && "bg-accent",
+                  "group flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors min-w-0",
+                  "text-sidebar-foreground/75 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
+                  location.pathname === `/game/${game.id}` &&
+                    "bg-sidebar-accent text-sidebar-accent-foreground shadow-[0_8px_20px_rgba(8,12,24,0.12)]",
                 )}
               >
                 <Star className="w-4 h-4 flex-shrink-0 text-yellow-500" />
@@ -96,17 +135,19 @@ export function Sidebar() {
       </nav>
 
       {/* Footer */}
-      <div className="p-2 border-t border-border">
+      <div className="p-3 border-t border-border/60">
         <div
           className={cn(
-            "flex items-center",
-            collapsed ? "justify-center" : "justify-between px-2",
+            "flex items-center gap-2 justify-between px-1",
+            collapsed && "lg:flex-col lg:justify-center lg:px-0",
           )}
         >
-          {!collapsed && <ModeToggle />}
+          <div className={cn(collapsed && "lg:hidden")}>
+            <ModeToggle />
+          </div>
           <button
             onClick={() => setCollapsed(!collapsed)}
-            className="hidden lg:flex p-2 rounded-md hover:bg-accent transition-colors"
+            className="hidden lg:flex h-9 w-9 items-center justify-center rounded-md bg-sidebar-accent/60 text-sidebar-foreground transition-colors hover:bg-sidebar-accent"
             title={collapsed ? "Развернуть" : "Свернуть"}
           >
             {collapsed ? (

@@ -4,6 +4,7 @@ mod games;
 mod metadata;
 mod scan;
 mod settings;
+mod stats;
 mod tracker;
 
 use backup::*;
@@ -12,6 +13,7 @@ use games::*;
 use metadata::*;
 use scan::{cancel_scan, scan_executables_stream, get_running_processes};
 use settings::*;
+use stats::*;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::{AppHandle, Manager, Runtime, WindowEvent};
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -185,6 +187,8 @@ pub fn run() {
             add_scan_directory,
             get_scan_directories,
             remove_scan_directory,
+            // Stats commands
+            get_playtime_stats,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
