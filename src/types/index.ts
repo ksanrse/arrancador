@@ -127,3 +127,22 @@ export interface ProcessEntry {
   cpu_usage: number;
   gpu_usage: number;
 }
+
+export interface DailyPlaytime {
+  date: string;
+  seconds: number;
+}
+
+export interface GamePlaytime {
+  id: string;
+  name: string;
+  seconds: number;
+}
+
+export interface PlaytimeStats {
+  range_start: string;
+  range_end: string;
+  total_seconds: number;
+  daily_totals: DailyPlaytime[];
+  per_game_totals: GamePlaytime[];
+}

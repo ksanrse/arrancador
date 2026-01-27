@@ -55,7 +55,8 @@ Save to `{@artifacts_path}/plan.md`. If the feature is trivial and doesn't warra
 <!-- chat-id: 38d18a19-211f-49ab-9643-4ddfce56c410 -->
 Update `src/components/Sidebar.tsx` (and layout styles) to lock width, reduce jitter, and polish nav styling. Verify by navigating between pages and toggling collapse.
 
-### [ ] Step: Playtime aggregation + stats API
+### [x] Step: Playtime aggregation + stats API
+<!-- chat-id: 1c102fce-52b0-43e2-861d-c5d32abd81e4 -->
 Add `playtime_daily` storage, tracker updates, and a range-based stats command in Rust; expose it in `src/lib/api.ts`. Verify with `cargo test` or manual DB checks.
 
 ### [ ] Step: Statistics charts refresh
