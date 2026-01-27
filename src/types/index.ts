@@ -28,6 +28,7 @@ export interface Game {
   backup_enabled: boolean;
   last_backup: string | null;
   backup_count: number;
+  save_path: string | null;
 
   user_rating: number | null;
   user_note: string | null;
@@ -46,6 +47,7 @@ export interface UpdateGame {
   cover_image?: string | null;
   is_favorite?: boolean;
   backup_enabled?: boolean;
+  save_path?: string | null;
   rawg_id?: number | null;
   released?: string | null;
   background_image?: string | null;
@@ -111,6 +113,9 @@ export interface AppSettings {
   backup_directory: string;
   auto_backup: boolean;
   backup_before_launch: boolean;
+  backup_compression_enabled: boolean;
+  backup_compression_level: number;
+  backup_skip_compression_once: boolean;
   max_backups_per_game: number;
   rawg_api_key: string;
 }

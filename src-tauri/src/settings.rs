@@ -9,6 +9,9 @@ pub struct AppSettings {
     pub backup_directory: String,
     pub auto_backup: bool,
     pub backup_before_launch: bool,
+    pub backup_compression_enabled: bool,
+    pub backup_compression_level: i32,
+    pub backup_skip_compression_once: bool,
     pub max_backups_per_game: i32,
     pub rawg_api_key: String,
 }
@@ -20,11 +23,22 @@ impl Default for AppSettings {
             ludusavi_path: String::new(),
             backup_directory: String::new(),
             auto_backup: true,
-            backup_before_launch: true,
+            backup_before_launch: false,
+            backup_compression_enabled: true,
+            backup_compression_level: 60,
+            backup_skip_compression_once: false,
             max_backups_per_game: 5,
             rawg_api_key: String::new(),
         }
     }
+}
+
+fn clamp_max_backups(value: i32) -> i32 {
+    value.clamp(1, 100)
+}
+
+fn clamp_compression_level(value: i32) -> i32 {
+    value.clamp(1, 100)
 }
 
 #[tauri::command]
@@ -45,8 +59,18 @@ pub fn get_all_settings() -> Result<AppSettings, String> {
                 "backup_directory" => settings.backup_directory = value,
                 "auto_backup" => settings.auto_backup = value == "true",
                 "backup_before_launch" => settings.backup_before_launch = value == "true",
+                "backup_compression_enabled" => {
+                    settings.backup_compression_enabled = value == "true"
+                }
+                "backup_compression_level" => {
+                    settings.backup_compression_level =
+                        clamp_compression_level(value.parse().unwrap_or(60))
+                }
+                "backup_skip_compression_once" => {
+                    settings.backup_skip_compression_once = value == "true"
+                }
                 "max_backups_per_game" => {
-                    settings.max_backups_per_game = value.parse().unwrap_or(5)
+                    settings.max_backups_per_game = clamp_max_backups(value.parse().unwrap_or(5))
                 }
                 "rawg_api_key" => settings.rawg_api_key = value,
                 _ => {}
@@ -61,6 +85,8 @@ pub fn get_all_settings() -> Result<AppSettings, String> {
 #[tauri::command]
 pub fn update_settings(settings: AppSettings) -> Result<(), String> {
     with_db(|conn| {
+        let max_backups = clamp_max_backups(settings.max_backups_per_game);
+        let compression_level = clamp_compression_level(settings.backup_compression_level);
         let pairs = vec![
             ("theme", settings.theme),
             ("ludusavi_path", settings.ludusavi_path),
@@ -84,8 +110,30 @@ pub fn update_settings(settings: AppSettings) -> Result<(), String> {
                 .to_string(),
             ),
             (
+                "backup_compression_enabled",
+                if settings.backup_compression_enabled {
+                    "true"
+                } else {
+                    "false"
+                }
+                .to_string(),
+            ),
+            (
+                "backup_compression_level",
+                compression_level.to_string(),
+            ),
+            (
+                "backup_skip_compression_once",
+                if settings.backup_skip_compression_once {
+                    "true"
+                } else {
+                    "false"
+                }
+                .to_string(),
+            ),
+            (
                 "max_backups_per_game",
-                settings.max_backups_per_game.to_string(),
+                max_backups.to_string(),
             ),
             ("rawg_api_key", settings.rawg_api_key),
         ];

@@ -42,6 +42,7 @@ pub struct Game {
     pub backup_enabled: bool,
     pub last_backup: Option<String>,
     pub backup_count: i32,
+    pub save_path: Option<String>,
 
     pub user_rating: Option<i32>,
     pub user_note: Option<String>,
@@ -62,6 +63,7 @@ pub struct UpdateGame {
     pub cover_image: Option<String>,
     pub is_favorite: Option<bool>,
     pub backup_enabled: Option<bool>,
+    pub save_path: Option<String>,
     pub rawg_id: Option<i64>,
     pub released: Option<String>,
     pub background_image: Option<String>,
@@ -101,8 +103,9 @@ impl Game {
             backup_enabled: row.get::<_, i32>(20)? == 1,
             last_backup: row.get(21)?,
             backup_count: row.get(22)?,
-            user_rating: row.get(23)?,
-            user_note: row.get(24)?,
+            save_path: row.get(23)?,
+            user_rating: row.get(24)?,
+            user_note: row.get(25)?,
         })
     }
 }
@@ -114,7 +117,7 @@ pub fn get_game(id: String) -> Result<Option<Game>, String> {
             "SELECT id, name, exe_path, exe_name, rawg_id, description, released,
              background_image, metacritic, rating, genres, platforms, developers, publishers,
              cover_image, is_favorite, play_count, total_playtime, last_played, date_added,
-             backup_enabled, last_backup, backup_count, user_rating, user_note
+             backup_enabled, last_backup, backup_count, save_path, user_rating, user_note
              FROM games WHERE id = ?1",
         )?;
 
@@ -139,7 +142,7 @@ pub fn add_game(game: NewGame) -> Result<Game, String> {
             "SELECT id, name, exe_path, exe_name, rawg_id, description, released,
              background_image, metacritic, rating, genres, platforms, developers, publishers,
              cover_image, is_favorite, play_count, total_playtime, last_played, date_added,
-             backup_enabled, last_backup, backup_count, user_rating, user_note
+             backup_enabled, last_backup, backup_count, save_path, user_rating, user_note
              FROM games WHERE id = ?1"
         )?;
 
@@ -173,7 +176,7 @@ pub fn get_all_games() -> Result<Vec<Game>, String> {
             "SELECT id, name, exe_path, exe_name, rawg_id, description, released,
              background_image, metacritic, rating, genres, platforms, developers, publishers,
              cover_image, is_favorite, play_count, total_playtime, last_played, date_added,
-             backup_enabled, last_backup, backup_count, user_rating, user_note
+             backup_enabled, last_backup, backup_count, save_path, user_rating, user_note
              FROM games ORDER BY name ASC",
         )?;
 
@@ -194,7 +197,7 @@ pub fn get_favorites() -> Result<Vec<Game>, String> {
             "SELECT id, name, exe_path, exe_name, rawg_id, description, released,
              background_image, metacritic, rating, genres, platforms, developers, publishers,
              cover_image, is_favorite, play_count, total_playtime, last_played, date_added,
-             backup_enabled, last_backup, backup_count, user_rating, user_note
+             backup_enabled, last_backup, backup_count, save_path, user_rating, user_note
              FROM games WHERE is_favorite = 1 ORDER BY name ASC",
         )?;
 
@@ -233,6 +236,15 @@ pub fn update_game(update: UpdateGame) -> Result<Game, String> {
         if let Some(backup) = update.backup_enabled {
             updates.push("backup_enabled = ?");
             params_vec.push(Box::new(if backup { 1 } else { 0 }));
+        }
+        if let Some(ref save_path) = update.save_path {
+            updates.push("save_path = ?");
+            let normalized = if save_path.trim().is_empty() {
+                None
+            } else {
+                Some(save_path.clone())
+            };
+            params_vec.push(Box::new(normalized));
         }
         if let Some(rawg_id) = update.rawg_id {
             updates.push("rawg_id = ?");
@@ -284,7 +296,7 @@ pub fn update_game(update: UpdateGame) -> Result<Game, String> {
                 "SELECT id, name, exe_path, exe_name, rawg_id, description, released,
                  background_image, metacritic, rating, genres, platforms, developers, publishers,
                  cover_image, is_favorite, play_count, total_playtime, last_played, date_added,
-                 backup_enabled, last_backup, backup_count, user_rating, user_note
+                 backup_enabled, last_backup, backup_count, save_path, user_rating, user_note
                  FROM games WHERE id = ?1",
             )?;
             return stmt.query_row(params![update.id], Game::from_row);
@@ -302,7 +314,7 @@ pub fn update_game(update: UpdateGame) -> Result<Game, String> {
             "SELECT id, name, exe_path, exe_name, rawg_id, description, released,
              background_image, metacritic, rating, genres, platforms, developers, publishers,
              cover_image, is_favorite, play_count, total_playtime, last_played, date_added,
-             backup_enabled, last_backup, backup_count, user_rating, user_note
+             backup_enabled, last_backup, backup_count, save_path, user_rating, user_note
              FROM games WHERE id = ?1",
         )?;
 
@@ -323,7 +335,7 @@ pub fn toggle_favorite(id: String) -> Result<Game, String> {
             "SELECT id, name, exe_path, exe_name, rawg_id, description, released,
              background_image, metacritic, rating, genres, platforms, developers, publishers,
              cover_image, is_favorite, play_count, total_playtime, last_played, date_added,
-             backup_enabled, last_backup, backup_count, user_rating, user_note
+             backup_enabled, last_backup, backup_count, save_path, user_rating, user_note
              FROM games WHERE id = ?1"
         )?;
 
@@ -354,7 +366,7 @@ pub fn record_game_launch(id: String) -> Result<Game, String> {
             "SELECT id, name, exe_path, exe_name, rawg_id, description, released,
              background_image, metacritic, rating, genres, platforms, developers, publishers,
              cover_image, is_favorite, play_count, total_playtime, last_played, date_added,
-             backup_enabled, last_backup, backup_count
+             backup_enabled, last_backup, backup_count, save_path, user_rating, user_note
              FROM games WHERE id = ?1",
         )?;
 
@@ -371,7 +383,7 @@ pub fn search_games(query: String) -> Result<Vec<Game>, String> {
             "SELECT id, name, exe_path, exe_name, rawg_id, description, released,
              background_image, metacritic, rating, genres, platforms, developers, publishers,
              cover_image, is_favorite, play_count, total_playtime, last_played, date_added,
-             backup_enabled, last_backup, backup_count, user_rating, user_note
+             backup_enabled, last_backup, backup_count, save_path, user_rating, user_note
              FROM games WHERE name LIKE ?1 OR exe_name LIKE ?1 ORDER BY name ASC",
         )?;
 

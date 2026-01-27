@@ -47,7 +47,8 @@ export const backupApi = {
   setLudusaviPath: (path: string) => invoke<void>("set_ludusavi_path", { path }),
   setBackupDirectory: (path: string) => invoke<void>("set_backup_directory", { path }),
   getBackupDirectory: () => invoke<string>("get_backup_directory_setting"),
-  findGameSaves: (gameName: string) => invoke<BackupInfo | null>("find_game_saves", { gameName }),
+  findGameSaves: (gameName: string, gameId?: string) =>
+    invoke<BackupInfo | null>("find_game_saves", { gameName, gameId }),
   create: (gameId: string, gameName: string, isAuto: boolean, notes?: string) =>
     invoke<Backup>("create_backup", { gameId, gameName, isAuto, notes }),
   getForGame: (gameId: string) => invoke<Backup[]>("get_game_backups", { gameId }),

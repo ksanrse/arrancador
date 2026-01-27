@@ -1,4 +1,4 @@
-use crate::backup::save_locator::locate_game_saves;
+use crate::backup::save_locator::{locate_game_saves, SaveDiscovery};
 use crate::backup::sqoba_manifest::{SqobaGame, SqobaManifest};
 use rayon::prelude::*;
 use regex::Regex;
@@ -50,7 +50,13 @@ pub struct BackupProgress {
 #[derive(Debug, Clone, Copy)]
 pub enum BackupMode {
     Directory,
-    Zip { level: u8 },
+    Zip { level: u8, compression: ZipCompression },
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ZipCompression {
+    Deflate,
+    Zstd,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -67,7 +73,19 @@ impl BackupOptions {
 
     pub fn zip(level: u8) -> Self {
         Self {
-            mode: BackupMode::Zip { level },
+            mode: BackupMode::Zip {
+                level,
+                compression: ZipCompression::Zstd,
+            },
+        }
+    }
+
+    pub fn zip_deflate(level: u8) -> Self {
+        Self {
+            mode: BackupMode::Zip {
+                level,
+                compression: ZipCompression::Deflate,
+            },
         }
     }
 }
@@ -126,6 +144,14 @@ impl BackupEngine {
         self.find_game_entry_with_key(name).map(|(_, entry)| entry)
     }
 
+    pub fn discover_game_saves(
+        &self,
+        name: &str,
+        override_path: Option<&str>,
+    ) -> Result<Option<SaveDiscovery>, String> {
+        locate_game_saves(name, self.manifest.as_ref(), override_path)
+    }
+
     fn find_game_entry_with_key(&self, name: &str) -> Option<(String, SqobaGame)> {
         let manifest = self.manifest.as_ref()?;
         manifest.find_game_entry(name)
@@ -133,7 +159,7 @@ impl BackupEngine {
 
     /// Finds save files for a game without backing them up
     pub fn find_game_files(&self, name: &str) -> Result<Option<(Vec<PathBuf>, u64)>, String> {
-        let discovery = locate_game_saves(name, self.manifest.as_ref(), None)?;
+        let discovery = self.discover_game_saves(name, None)?;
         let Some(discovery) = discovery else {
             return Ok(None);
         };
@@ -172,6 +198,7 @@ impl BackupEngine {
             destination,
             threads,
             BackupOptions::default(),
+            None,
             progress,
         )
     }
@@ -182,7 +209,7 @@ impl BackupEngine {
         destination: &Path,
         options: BackupOptions,
     ) -> Result<u64, String> {
-        self.backup_game_with_options_and_progress(name, destination, 4, options, None)
+        self.backup_game_with_options_and_progress(name, destination, 4, options, None, None)
     }
 
     pub fn backup_game_with_threads_and_options(
@@ -192,7 +219,7 @@ impl BackupEngine {
         threads: usize,
         options: BackupOptions,
     ) -> Result<u64, String> {
-        self.backup_game_with_options_and_progress(name, destination, threads, options, None)
+        self.backup_game_with_options_and_progress(name, destination, threads, options, None, None)
     }
 
     pub fn backup_game_with_options_and_progress(
@@ -201,10 +228,11 @@ impl BackupEngine {
         destination: &Path,
         threads: usize,
         options: BackupOptions,
+        override_path: Option<&str>,
         progress: Option<Arc<dyn Fn(BackupProgress) + Send + Sync>>,
     ) -> Result<u64, String> {
         let matched_name = self.find_game_entry_with_key(name).map(|(key, _)| key);
-        let discovery = locate_game_saves(name, self.manifest.as_ref(), None)?;
+        let discovery = locate_game_saves(name, self.manifest.as_ref(), override_path)?;
         let discovery = match discovery {
             Some(discovery) => discovery,
             None => {
@@ -236,8 +264,8 @@ impl BackupEngine {
                 threads,
                 progress,
             )?,
-            BackupMode::Zip { level } => {
-                self.backup_to_zip(destination, &file_list, level, progress)?
+            BackupMode::Zip { level, compression } => {
+                self.backup_to_zip(destination, &file_list, level, compression, progress)?
             }
         };
 
@@ -416,6 +444,7 @@ impl BackupEngine {
         destination: &Path,
         files: &[BackupSourceFile],
         level: u8,
+        compression: ZipCompression,
         progress: Option<Arc<dyn Fn(BackupProgress) + Send + Sync>>,
     ) -> Result<u64, String> {
         if destination.exists() && destination.is_dir() {
@@ -429,7 +458,7 @@ impl BackupEngine {
         let file = File::create(destination).map_err(|e| e.to_string())?;
         let writer = BufWriter::new(file);
         let mut archive = ZipWriter::new(writer);
-        let file_options = zip_data_options(level);
+        let file_options = zip_data_options(level, compression);
         let total = files.len();
 
         let mut entries: Vec<BackupFileEntry> = Vec::with_capacity(total);
@@ -645,19 +674,37 @@ fn system_time_to_epoch_seconds(time: SystemTime) -> Option<i64> {
         .map(|duration| duration.as_secs() as i64)
 }
 
-fn zip_data_options(level: u8) -> FileOptions<'static, ()> {
+fn zip_data_options(level: u8, compression: ZipCompression) -> FileOptions<'static, ()> {
+    let method = match compression {
+        ZipCompression::Deflate => CompressionMethod::Deflated,
+        ZipCompression::Zstd => CompressionMethod::Zstd,
+    };
     FileOptions::default()
-        .compression_method(CompressionMethod::Deflated)
-        .compression_level(Some(map_deflate_level(level)))
+        .compression_method(method)
+        .compression_level(Some(map_zip_level(level, compression)))
 }
 
 fn zip_metadata_options() -> FileOptions<'static, ()> {
     FileOptions::default().compression_method(CompressionMethod::Stored)
 }
 
+fn map_zip_level(level: u8, compression: ZipCompression) -> i64 {
+    match compression {
+        ZipCompression::Deflate => map_deflate_level(level),
+        ZipCompression::Zstd => map_zstd_level(level),
+    }
+}
+
 fn map_deflate_level(level: u8) -> i64 {
     let clamped = level.clamp(1, 100) as i64;
     ((clamped - 1) * 8 / 99) + 1
+}
+
+fn map_zstd_level(level: u8) -> i64 {
+    let clamped = level.clamp(1, 100) as i64;
+    let min = -7i64;
+    let max = 22i64;
+    min + ((clamped - 1) * (max - min) / 99)
 }
 
 fn path_from_backup_rel(rel: &str) -> PathBuf {

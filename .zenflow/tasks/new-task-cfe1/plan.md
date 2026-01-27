@@ -54,10 +54,11 @@ Save to `{@artifacts_path}/plan.md`. If the feature is trivial and doesn't warra
 ### [x] Step: SQOBA manifest and save locator
 <!-- chat-id: 8e842c81-cdb8-4d56-8880-3fc01e65efb0 -->
 
-### [ ] Step: Compression-ready backup/restore
+### [x] Step: Compression-ready backup/restore
 <!-- chat-id: 7584e3c2-b67e-4307-a250-3beaab8101b2 -->
 
-### [ ] Step: DB + settings + API updates
+### [x] Step: DB + settings + API updates
+<!-- chat-id: 2a1a52e4-b870-4075-8aa0-051383ef0151 -->
 
 ### [ ] Step: UI updates for save paths and compression
 

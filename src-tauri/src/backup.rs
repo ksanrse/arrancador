@@ -35,8 +35,7 @@ pub mod engine;
 pub mod save_locator;
 #[path = "backup/sqoba_manifest.rs"]
 pub mod sqoba_manifest;
-use engine::BackupEngine;
-use engine::BackupProgress;
+use engine::{BackupEngine, BackupOptions, BackupProgress};
 
 lazy_static::lazy_static! {
     static ref BACKUP_ENGINE: Mutex<BackupEngine> = Mutex::new(BackupEngine::new());
@@ -250,16 +249,77 @@ fn get_game_year(game_id: &str) -> Option<String> {
     .and_then(|r| r.split('-').next().map(|s| s.to_string()))
 }
 
-fn get_max_backups() -> i32 {
+fn get_setting_value(key: &str) -> Option<String> {
     with_db(|conn| {
-        let mut stmt =
-            conn.prepare("SELECT value FROM settings WHERE key = 'max_backups_per_game'")?;
-        let val: String = stmt
-            .query_row([], |row| row.get(0))
-            .unwrap_or_else(|_| "5".to_string());
-        Ok(val.parse::<i32>().unwrap_or(5))
+        let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
+        Ok(stmt.query_row(params![key], |row| row.get(0)).ok())
     })
-    .unwrap_or(5)
+    .ok()
+    .flatten()
+}
+
+fn get_setting_bool(key: &str, default: bool) -> bool {
+    get_setting_value(key)
+        .map(|value| value == "true")
+        .unwrap_or(default)
+}
+
+fn get_setting_i32(key: &str, default: i32) -> i32 {
+    get_setting_value(key)
+        .and_then(|value| value.parse::<i32>().ok())
+        .unwrap_or(default)
+}
+
+fn get_game_save_path(game_id: &str) -> Option<String> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare("SELECT save_path FROM games WHERE id = ?1")?;
+        let value: Option<String> = stmt
+            .query_row(params![game_id], |row| row.get(0))
+            .unwrap_or(None);
+        Ok(value)
+    })
+    .ok()
+    .flatten()
+    .and_then(|path| {
+        let trimmed = path.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_string())
+        }
+    })
+}
+
+fn set_game_save_path(game_id: &str, save_path: &str) -> Result<(), String> {
+    with_db(|conn| {
+        conn.execute(
+            "UPDATE games SET save_path = ?1 WHERE id = ?2",
+            params![save_path, game_id],
+        )?;
+        Ok(())
+    })
+    .map_err(|e| e.to_string())
+}
+
+fn get_compression_settings() -> (bool, u8, bool) {
+    let enabled = get_setting_bool("backup_compression_enabled", true);
+    let level = get_setting_i32("backup_compression_level", 60).clamp(1, 100) as u8;
+    let skip_once = get_setting_bool("backup_skip_compression_once", false);
+    (enabled, level, skip_once)
+}
+
+fn clear_skip_compression_once() {
+    let _ = with_db(|conn| {
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('backup_skip_compression_once', 'false')",
+            [],
+        )?;
+        Ok(())
+    });
+}
+
+fn get_max_backups() -> i32 {
+    get_setting_i32("max_backups_per_game", 5).clamp(1, 100)
 }
 
 // Deprecated but kept for API compatibility, always returns true now
@@ -298,7 +358,10 @@ pub fn get_backup_directory_setting() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub fn find_game_saves(game_name: String) -> Result<Option<BackupInfo>, String> {
+pub fn find_game_saves(
+    game_name: String,
+    game_id: Option<String>,
+) -> Result<Option<BackupInfo>, String> {
     let mut engine = BACKUP_ENGINE.lock().map_err(|e| e.to_string())?;
 
     // Ensure manifest is loaded
@@ -306,20 +369,38 @@ pub fn find_game_saves(game_name: String) -> Result<Option<BackupInfo>, String> 
         .load_manifest()
         .map_err(|e| format!("Failed to load manifest: {}", e))?;
 
-    match engine.find_game_files(&game_name) {
-        Ok(Some((files, size))) => {
-            // Convert PathBufs to Strings
-            let file_strings: Vec<String> = files
+    let save_override = game_id.as_deref().and_then(get_game_save_path);
+
+    match engine.discover_game_saves(&game_name, save_override.as_deref()) {
+        Ok(Some(discovery)) => {
+            let file_strings: Vec<String> = discovery
+                .files
                 .iter()
-                .map(|p| p.to_string_lossy().to_string())
+                .map(|entry| entry.path.to_string_lossy().to_string())
                 .collect();
-            let first_path = file_strings.first().cloned();
+            let first_root = discovery
+                .roots
+                .first()
+                .map(|root| root.path.to_string_lossy().to_string());
+            let mut save_path = save_override.clone().or_else(|| first_root.clone());
+
+            if save_override.is_none() {
+                if discovery.roots.len() == 1 {
+                    if let (Some(game_id), Some(candidate)) =
+                        (game_id.as_deref(), first_root.clone())
+                    {
+                        if set_game_save_path(game_id, &candidate).is_ok() {
+                            save_path = Some(candidate);
+                        }
+                    }
+                }
+            }
 
             Ok(Some(BackupInfo {
                 game_name,
-                save_path: first_path,
-                registry_path: None, // TODO: Implement registry check if needed
-                total_size: size,
+                save_path,
+                registry_path: None,
+                total_size: discovery.total_size,
                 files: file_strings,
             }))
         }
@@ -357,6 +438,7 @@ fn create_backup_inner(
     engine
         .load_manifest()
         .map_err(|e| format!("Failed to load manifest: {}", e))?;
+    let save_path_override = get_game_save_path(&game_id);
 
     let backup_root = get_backup_directory();
     let threads = get_disk_threads(&backup_root);
@@ -373,7 +455,21 @@ fn create_backup_inner(
 
     // Create timestamped backup folder
     let timestamp = Local::now().format("%H%M%S_%d%m%Y").to_string();
-    let backup_path = game_backup_dir.join(&timestamp);
+    let (compression_enabled, compression_level, skip_once) = get_compression_settings();
+    let use_compression = compression_enabled && !skip_once;
+    if skip_once {
+        clear_skip_compression_once();
+    }
+    let backup_path = if use_compression {
+        game_backup_dir.join(format!("{}.sqoba.zip", timestamp))
+    } else {
+        game_backup_dir.join(&timestamp)
+    };
+    let backup_options = if use_compression {
+        BackupOptions::zip(compression_level)
+    } else {
+        BackupOptions::directory()
+    };
 
     // Run native backup
     if let Some(app) = &app {
@@ -406,10 +502,12 @@ fn create_backup_inner(
         }) as Arc<dyn Fn(BackupProgress) + Send + Sync>
     });
 
-    let backup_size = engine.backup_game_with_threads_and_progress(
+    let backup_size = engine.backup_game_with_options_and_progress(
         &game_name,
         &backup_path,
         threads,
+        backup_options,
+        save_path_override.as_deref(),
         progress,
     )?;
 
@@ -680,10 +778,10 @@ pub fn should_backup_before_launch(game_id: String) -> Result<bool, String> {
             conn.prepare("SELECT value FROM settings WHERE key = 'backup_before_launch'")?;
         let result: String = stmt
             .query_row([], |row| row.get(0))
-            .unwrap_or_else(|_| "true".to_string());
+            .unwrap_or_else(|_| "false".to_string());
         Ok(result)
     })
-    .unwrap_or_else(|_| "true".to_string());
+    .unwrap_or_else(|_| "false".to_string());
 
     if auto_backup != "true" {
         return Ok(false);
@@ -705,7 +803,7 @@ pub fn should_backup_before_launch(game_id: String) -> Result<bool, String> {
 #[tauri::command]
 pub fn check_backup_needed(game_id: String, game_name: String) -> Result<bool, String> {
     // Find current save data
-    let save_info = find_game_saves(game_name)?;
+    let save_info = find_game_saves(game_name, Some(game_id.clone()))?;
 
     if save_info.is_none() {
         return Ok(false);
@@ -769,7 +867,7 @@ pub fn check_backup_needed(game_id: String, game_name: String) -> Result<bool, S
 
 #[tauri::command]
 pub fn check_restore_needed(game_id: String, game_name: String) -> Result<RestoreCheck, String> {
-    let save_info = find_game_saves(game_name)?;
+    let save_info = find_game_saves(game_name, Some(game_id.clone()))?;
 
     if save_info.is_none() {
         return Ok(RestoreCheck {
