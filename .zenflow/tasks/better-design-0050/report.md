@@ -1,13 +1,8 @@
-# Better-design Implementation Report
+# Better-design Report
 
 ## Summary
-- Stabilized the sidebar layout (fixed desktop width, scroll-gutter support) and persisted collapse state.
-- Added daily playtime storage plus a new stats command to serve range-based totals and per-game breakdowns.
-- Rebuilt the statistics view with range presets/custom dates, readable charts, and per-game focus selection.
+- Rebuilt the Statistics view around range-based playtime stats with presets, KPIs, and clearer daily/per-game charts.
 
 ## Tests
-- `cargo test` (in `src-tauri`)
-- `pnpm test` not run (no test script defined in `package.json`).
-
-## Notes
-- `cargo test` reports existing `dead_code` warnings in `src-tauri/src/backup/engine.rs`.
+- `pnpm test` (fails: no `test` script in `package.json`).
+- `cargo test` (pass, warning: unused backup engine methods).
