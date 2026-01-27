@@ -165,6 +165,9 @@ export default function GameDetail() {
   useEffect(() => {
     const found = games.find((g) => g.id === id);
     if (found) {
+      const isSameGame = game?.id === found.id;
+      const currentSavedPath = game?.save_path ?? "";
+      const draftTrimmed = savePathDraft.trim();
       setGame(found);
       // Initialize edit form
       setEditForm({
@@ -174,7 +177,9 @@ export default function GameDetail() {
       });
       setUserRating(found.user_rating ?? null);
       setUserNote(found.user_note || "");
-      setSavePathDraft(found.save_path || "");
+      if (!isSameGame || draftTrimmed === currentSavedPath) {
+        setSavePathDraft(found.save_path || "");
+      }
     }
   }, [id, games]);
 
@@ -502,7 +507,10 @@ export default function GameDetail() {
     });
 
     if (selected) {
-      setSavePathDraft(selected as string);
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      if (path) {
+        setSavePathDraft(path);
+      }
     }
   };
 
