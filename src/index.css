@@ -217,3 +217,7 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
 }
+
+.scrollbar-stable {
+    scrollbar-gutter: stable both-edges;
+}

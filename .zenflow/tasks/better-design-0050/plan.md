@@ -59,8 +59,9 @@ Update `src/components/Sidebar.tsx` (and layout styles) to lock width, reduce ji
 <!-- chat-id: 1c102fce-52b0-43e2-861d-c5d32abd81e4 -->
 Add `playtime_daily` storage, tracker updates, and a range-based stats command in Rust; expose it in `src/lib/api.ts`. Verify with `cargo test` or manual DB checks.
 
-### [ ] Step: Statistics charts refresh
+### [x] Step: Statistics charts refresh
+<!-- chat-id: ce7f5b7e-f827-43f6-aab7-2dc4dec95a70 -->
 Replace the existing chart with range totals + per-game breakdown (range selector) in `src/pages/Statistics.tsx`. Verify chart readability and data binding.
 
-### [ ] Step: Verification + report
+### [x] Step: Verification + report
 Run available tests (`pnpm test`, `cargo test`) and write `{@artifacts_path}/report.md` with implementation notes.

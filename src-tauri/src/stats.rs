@@ -58,7 +58,7 @@ pub fn get_playtime_stats(start: Option<String>, end: Option<String>) -> Result<
         )?;
 
         let mut daily_map: HashMap<String, i64> = HashMap::new();
-        let rows = daily_stmt.query_map(params![range_start, range_end], |row| {
+        let rows = daily_stmt.query_map(params![&range_start, &range_end], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
         for row in rows {
@@ -88,7 +88,7 @@ pub fn get_playtime_stats(start: Option<String>, end: Option<String>) -> Result<
              ORDER BY seconds DESC",
         )?;
         let per_game_totals = game_stmt
-            .query_map(params![range_start, range_end], |row| {
+            .query_map(params![&range_start, &range_end], |row| {
                 Ok(GameTotal {
                     id: row.get(0)?,
                     name: row.get(1)?,

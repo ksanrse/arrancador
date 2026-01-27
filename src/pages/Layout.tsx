@@ -30,10 +30,12 @@ export default function Layout() {
         </div>
 
         {/* Sidebar wrapper for responsiveness */}
-        <div className={cn(
-          "fixed inset-0 z-40 lg:relative lg:z-auto transition-transform duration-300 lg:translate-x-0",
-          isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-        )}>
+        <div
+          className={cn(
+            "fixed inset-0 z-40 lg:static lg:z-auto transition-transform duration-300 lg:translate-x-0 shrink-0",
+            isMobileMenuOpen ? "translate-x-0" : "-translate-x-full",
+          )}
+        >
           {/* Backdrop for mobile */}
           <div 
             className={cn(
@@ -45,7 +47,7 @@ export default function Layout() {
           <Sidebar />
         </div>
 
-        <main className="flex-1 overflow-auto pt-14 lg:pt-0">
+        <main className="flex-1 min-w-0 overflow-auto pt-14 lg:pt-0 scrollbar-stable">
           <div className="min-h-full max-w-[1600px] mx-auto">
             <Outlet />
           </div>

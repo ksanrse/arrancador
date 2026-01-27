@@ -7,11 +7,13 @@ import {
   Settings,
   Star,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useGames } from "@/store/GamesContext";
 import { ModeToggle } from "./mode-toggle";
+
+const SIDEBAR_STORAGE_KEY = "arrancador_sidebar_collapsed";
 
 const navItems = [
   { title: "Библиотека", to: "/", icon: Gamepad2 },
@@ -21,11 +23,21 @@ const navItems = [
 ];
 
 export function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true";
+  });
   const { favorites } = useGames();
   const location = useLocation();
-  const sidebarWidthClass = collapsed ? "lg:w-16" : "lg:w-64";
-  const navItemLayoutClass = collapsed ? "justify-center px-2" : "px-3";
+  const sidebarWidthClass = collapsed
+    ? "lg:w-[72px] lg:min-w-[72px]"
+    : "lg:w-[260px] lg:min-w-[260px]";
+  const navItemLayoutClass = collapsed ? "lg:justify-center lg:px-2" : "lg:px-3";
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(collapsed));
+  }, [collapsed]);
 
   return (
     <aside
@@ -33,15 +45,15 @@ export function Sidebar() {
         "h-screen flex flex-col border-r border-border/60 bg-sidebar/95 text-sidebar-foreground flex-none",
         "supports-[backdrop-filter]:bg-sidebar/80 backdrop-blur-xl",
         "transition-[width] duration-200 ease-out relative z-50 shadow-[0_20px_50px_rgba(8,12,24,0.2)]",
-        "w-[280px] sm:w-[300px]",
+        "w-[280px] sm:w-[320px]",
         sidebarWidthClass,
       )}
     >
       {/* Logo */}
       <div
         className={cn(
-          "h-14 flex items-center border-b border-border/60",
-          collapsed ? "justify-center px-2" : "gap-3 px-4",
+          "h-14 flex items-center gap-3 border-b border-border/60 px-4",
+          collapsed && "lg:justify-center lg:gap-0 lg:px-2",
         )}
       >
         <div
@@ -56,7 +68,7 @@ export function Sidebar() {
         <span
           className={cn(
             "font-semibold text-base tracking-tight",
-            collapsed && "sr-only",
+            collapsed && "lg:sr-only",
           )}
         >
           Arrancador
@@ -64,7 +76,7 @@ export function Sidebar() {
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
+      <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto scrollbar-stable">
         {navItems.map(({ title, to, icon: Icon }) => {
           const isActive =
             location.pathname === to ||
@@ -76,7 +88,7 @@ export function Sidebar() {
               to={to}
               title={collapsed ? title : undefined}
               className={cn(
-                "group relative flex items-center gap-3 rounded-lg py-2 text-sm font-medium transition-colors min-w-0",
+                "group relative flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors min-w-0",
                 navItemLayoutClass,
                 "text-sidebar-foreground/80 hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground",
                 isActive &&
@@ -84,7 +96,7 @@ export function Sidebar() {
               )}
             >
               <Icon className="w-5 h-5 flex-shrink-0" />
-              <span className={cn("truncate", collapsed && "sr-only")}>
+              <span className={cn("truncate", collapsed && "lg:hidden")}>
                 {title}
               </span>
             </NavLink>
@@ -92,8 +104,8 @@ export function Sidebar() {
         })}
 
         {/* Favorites Section */}
-        {favorites.length > 0 && !collapsed && (
-          <div className="pt-4 mt-4 border-t border-border/60">
+        {favorites.length > 0 && (
+          <div className={cn("pt-4 mt-4 border-t border-border/60", collapsed && "lg:hidden")}>
             <div className="px-3 py-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
               Избранное
             </div>
@@ -126,11 +138,13 @@ export function Sidebar() {
       <div className="p-3 border-t border-border/60">
         <div
           className={cn(
-            "flex items-center gap-2",
-            collapsed ? "flex-col" : "justify-between px-1",
+            "flex items-center gap-2 justify-between px-1",
+            collapsed && "lg:flex-col lg:justify-center lg:px-0",
           )}
         >
-          <ModeToggle />
+          <div className={cn(collapsed && "lg:hidden")}>
+            <ModeToggle />
+          </div>
           <button
             onClick={() => setCollapsed(!collapsed)}
             className="hidden lg:flex h-9 w-9 items-center justify-center rounded-md bg-sidebar-accent/60 text-sidebar-foreground transition-colors hover:bg-sidebar-accent"
