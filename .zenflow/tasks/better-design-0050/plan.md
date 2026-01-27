@@ -52,6 +52,7 @@ Save to `{@artifacts_path}/plan.md`. If the feature is trivial and doesn't warra
 ---
 
 ### [ ] Step: Sidebar stability + UX refresh
+<!-- chat-id: 38d18a19-211f-49ab-9643-4ddfce56c410 -->
 Update `src/components/Sidebar.tsx` (and layout styles) to lock width, reduce jitter, and polish nav styling. Verify by navigating between pages and toggling collapse.
 
 ### [ ] Step: Playtime aggregation + stats API
