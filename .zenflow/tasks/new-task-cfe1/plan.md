@@ -60,6 +60,7 @@ Save to `{@artifacts_path}/plan.md`. If the feature is trivial and doesn't warra
 ### [x] Step: DB + settings + API updates
 <!-- chat-id: 2a1a52e4-b870-4075-8aa0-051383ef0151 -->
 
-### [ ] Step: UI updates for save paths and compression
+### [x] Step: UI updates for save paths and compression
+<!-- chat-id: 9e2f6543-9bb2-4bb5-bbee-6f5d0456a2ed -->
 
-### [ ] Step: Tests, verification, and report
+### [x] Step: Tests, verification, and report

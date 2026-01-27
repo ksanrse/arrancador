@@ -4,6 +4,7 @@ import {
   Check,
   ExternalLink,
   FolderOpen,
+  HardDrive,
   Key,
   Loader2,
   Monitor,
@@ -30,6 +31,9 @@ export default function Settings() {
   const [backupDirectory, setBackupDirectory] = useState("");
   const [autoBackup, setAutoBackup] = useState(true);
   const [backupBeforeLaunch, setBackupBeforeLaunch] = useState(true);
+  const [compressionEnabled, setCompressionEnabled] = useState(true);
+  const [compressionLevel, setCompressionLevel] = useState(60);
+  const [skipCompressionOnce, setSkipCompressionOnce] = useState(false);
   const [maxBackups, setMaxBackups] = useState(5);
   const [rawgApiKey, setRawgApiKey] = useState("");
   const [autoStart, setAutoStart] = useState(false);
@@ -38,6 +42,26 @@ export default function Settings() {
     loadSettings();
     checkAutoStart();
   }, []);
+
+  const clampNumber = (value: number, min: number, max: number) =>
+    Math.min(max, Math.max(min, value));
+
+  const handleCompressionToggle = (next: boolean) => {
+    setCompressionEnabled(next);
+    if (!next) {
+      setSkipCompressionOnce(false);
+    }
+  };
+
+  const handleCompressionLevelChange = (value: number) => {
+    if (Number.isNaN(value)) return;
+    setCompressionLevel(clampNumber(value, 1, 100));
+  };
+
+  const handleMaxBackupsChange = (value: number) => {
+    if (Number.isNaN(value)) return;
+    setMaxBackups(clampNumber(value, 1, 100));
+  };
 
   const checkAutoStart = async () => {
     try {
@@ -77,6 +101,9 @@ export default function Settings() {
       setBackupDirectory(appSettings.backup_directory);
       setAutoBackup(appSettings.auto_backup);
       setBackupBeforeLaunch(appSettings.backup_before_launch);
+      setCompressionEnabled(appSettings.backup_compression_enabled);
+      setCompressionLevel(appSettings.backup_compression_level);
+      setSkipCompressionOnce(appSettings.backup_skip_compression_once);
       setMaxBackups(appSettings.max_backups_per_game);
       setRawgApiKey(appSettings.rawg_api_key);
     } catch (e) {
@@ -95,6 +122,9 @@ export default function Settings() {
         backup_directory: backupDirectory,
         auto_backup: autoBackup,
         backup_before_launch: backupBeforeLaunch,
+        backup_compression_enabled: compressionEnabled,
+        backup_compression_level: compressionLevel,
+        backup_skip_compression_once: skipCompressionOnce,
         max_backups_per_game: maxBackups,
         rawg_api_key: rawgApiKey,
         ludusavi_path: "native",
@@ -269,9 +299,11 @@ export default function Settings() {
               <Input
                 type="number"
                 min={1}
-                max={20}
+                max={100}
                 value={maxBackups}
-                onChange={(e) => setMaxBackups(parseInt(e.target.value) || 5)}
+                onChange={(event) =>
+                  handleMaxBackupsChange(parseInt(event.target.value, 10))
+                }
                 className="w-24"
               />
               <p className="text-xs text-muted-foreground mt-1">
@@ -314,6 +346,97 @@ export default function Settings() {
                 />
               </div>
             </div>
+          </div>
+        </section>
+
+        {/* Compression Settings */}
+        <section className="space-y-4">
+          <div className="flex items-center gap-2">
+            <HardDrive className="w-5 h-5" />
+            <h2 className="text-lg font-semibold">
+              {"\u0421\u0436\u0430\u0442\u0438\u0435 SQOBA"}
+            </h2>
+          </div>
+
+          <div className="bg-card rounded-lg border p-4 space-y-4">
+            <div
+              className="flex items-center justify-between gap-3 rounded-md px-2 py-2 cursor-pointer hover:bg-accent/50 transition-colors"
+              onClick={() => handleCompressionToggle(!compressionEnabled)}
+            >
+              <div>
+                <span id="setting-compression" className="text-sm font-medium">
+                  {"\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u0441\u0436\u0430\u0442\u0438\u0435"}
+                </span>
+                <span className="text-xs text-muted-foreground block">
+                  {"\u0421\u0436\u0430\u0442\u044b\u0435 \u0431\u044d\u043a\u0430\u043f\u044b \u0437\u0430\u043d\u0438\u043c\u0430\u044e\u0442 \u043c\u0435\u043d\u044c\u0448\u0435 \u043c\u0435\u0441\u0442\u0430 \u0438 \u043b\u0443\u0447\u0448\u0435 \u0445\u0440\u0430\u043d\u044f\u0442 \u0438\u0441\u0442\u043e\u0440\u0438\u044e."}
+                </span>
+              </div>
+              <Switch
+                checked={compressionEnabled}
+                onCheckedChange={handleCompressionToggle}
+                aria-labelledby="setting-compression"
+                onClick={(event) => event.stopPropagation()}
+              />
+            </div>
+
+            <div className={`space-y-3 ${compressionEnabled ? "" : "opacity-50"}`}>
+              <div className="flex items-center gap-3">
+                <label className="text-xs text-muted-foreground">
+                  {"\u0423\u0440\u043e\u0432\u0435\u043d\u044c"}
+                </label>
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={compressionLevel}
+                  onChange={(event) =>
+                    handleCompressionLevelChange(
+                      parseInt(event.target.value, 10),
+                    )
+                  }
+                  className="w-20"
+                  disabled={!compressionEnabled}
+                />
+                <div className="text-xs text-muted-foreground ml-auto">
+                  {compressionLevel}
+                </div>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={100}
+                value={compressionLevel}
+                onChange={(event) =>
+                  handleCompressionLevelChange(parseInt(event.target.value, 10))
+                }
+                className="w-full accent-primary"
+                disabled={!compressionEnabled}
+              />
+              <p className="text-xs text-muted-foreground">
+                {"\u041d\u0438\u0437\u043a\u0438\u0435 \u0443\u0440\u043e\u0432\u043d\u0438 \u2014 \u0431\u044b\u0441\u0442\u0440\u0435\u0435, \u0432\u044b\u0441\u043e\u043a\u0438\u0435 \u2014 \u043a\u043e\u043c\u043f\u0430\u043a\u0442\u043d\u0435\u0435. \u0420\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0430\u0446\u0438\u044f: 40\u201370 \u0434\u043b\u044f \u0431\u0430\u043b\u0430\u043d\u0441\u0430."}
+              </p>
+            </div>
+
+            <div
+              className="flex items-center justify-between gap-3 rounded-md px-2 py-2 bg-background/30 cursor-pointer hover:bg-accent/50 transition-colors"
+              onClick={() =>
+                compressionEnabled && setSkipCompressionOnce((prev) => !prev)
+              }
+            >
+              <span id="setting-skip-compression" className="text-sm">
+                {"\u041f\u0440\u043e\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u0441\u0436\u0430\u0442\u0438\u0435 \u043e\u0434\u0438\u043d \u0440\u0430\u0437"}
+              </span>
+              <Switch
+                checked={skipCompressionOnce}
+                onCheckedChange={setSkipCompressionOnce}
+                aria-labelledby="setting-skip-compression"
+                disabled={!compressionEnabled}
+                onClick={(event) => event.stopPropagation()}
+              />
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {"\u0421\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u0431\u044d\u043a\u0430\u043f \u0431\u0443\u0434\u0435\u0442 \u0441\u043e\u0437\u0434\u0430\u043d \u0431\u0435\u0437 \u0441\u0436\u0430\u0442\u0438\u044f, \u0430 \u0437\u0430\u0442\u0435\u043c \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430 \u0432\u0435\u0440\u043d\u0435\u0442\u0441\u044f \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438."}
+            </p>
           </div>
         </section>
 
