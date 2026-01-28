@@ -55,6 +55,7 @@ pub enum BackupMode {
 
 #[derive(Debug, Clone, Copy)]
 pub enum ZipCompression {
+    #[allow(dead_code)]
     Deflate,
     Zstd,
 }
@@ -80,6 +81,7 @@ impl BackupOptions {
         }
     }
 
+    #[allow(dead_code)]
     pub fn zip_deflate(level: u8) -> Self {
         Self {
             mode: BackupMode::Zip {
@@ -140,6 +142,7 @@ impl BackupEngine {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn find_game_entry(&self, name: &str) -> Option<SqobaGame> {
         self.find_game_entry_with_key(name).map(|(_, entry)| entry)
     }
@@ -158,6 +161,7 @@ impl BackupEngine {
     }
 
     /// Finds save files for a game without backing them up
+    #[allow(dead_code)]
     pub fn find_game_files(&self, name: &str) -> Result<Option<(Vec<PathBuf>, u64)>, String> {
         let discovery = self.discover_game_saves(name, None)?;
         let Some(discovery) = discovery else {
@@ -173,10 +177,12 @@ impl BackupEngine {
         Ok(Some((files, discovery.total_size)))
     }
 
+    #[allow(dead_code)]
     pub fn backup_game(&self, name: &str, destination: &Path) -> Result<u64, String> {
         self.backup_game_with_threads(name, destination, 4)
     }
 
+    #[allow(dead_code)]
     pub fn backup_game_with_threads(
         &self,
         name: &str,
@@ -186,6 +192,7 @@ impl BackupEngine {
         self.backup_game_with_threads_and_progress(name, destination, threads, None)
     }
 
+    #[allow(dead_code)]
     pub fn backup_game_with_threads_and_progress(
         &self,
         name: &str,
@@ -203,6 +210,7 @@ impl BackupEngine {
         )
     }
 
+    #[allow(dead_code)]
     pub fn backup_game_with_options(
         &self,
         name: &str,
@@ -212,6 +220,7 @@ impl BackupEngine {
         self.backup_game_with_options_and_progress(name, destination, 4, options, None, None)
     }
 
+    #[allow(dead_code)]
     pub fn backup_game_with_threads_and_options(
         &self,
         name: &str,
@@ -278,10 +287,12 @@ impl BackupEngine {
         Ok(total_bytes)
     }
 
+    #[allow(dead_code)]
     pub fn restore_backup(&self, backup_path: &Path) -> Result<(), String> {
         self.restore_backup_with_threads(backup_path, 4)
     }
 
+    #[allow(dead_code)]
     pub fn restore_backup_with_threads(
         &self,
         backup_path: &Path,

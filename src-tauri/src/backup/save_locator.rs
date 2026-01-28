@@ -17,6 +17,7 @@ pub struct SaveFile {
     pub path: PathBuf,
     pub root_label: String,
     pub relative_path: PathBuf,
+    #[allow(dead_code)]
     pub size: u64,
 }
 
@@ -201,8 +202,18 @@ fn resolve_path(raw_path: &str, context: &PathResolutionContext) -> Vec<PathBuf>
     path = replace_token(path, "<winDocuments>", &context.documents, &mut missing);
     path = replace_token(path, "<documents>", &context.documents, &mut missing);
     path = replace_token(path, "<winAppData>", &context.appdata, &mut missing);
-    path = replace_token(path, "<winLocalAppData>", &context.local_appdata, &mut missing);
-    path = replace_token(path, "<winLocalAppDataLow>", &context.local_low, &mut missing);
+    path = replace_token(
+        path,
+        "<winLocalAppData>",
+        &context.local_appdata,
+        &mut missing,
+    );
+    path = replace_token(
+        path,
+        "<winLocalAppDataLow>",
+        &context.local_low,
+        &mut missing,
+    );
     path = replace_token(path, "<winLocalLow>", &context.local_low, &mut missing);
     path = replace_token(path, "<winSavedGames>", &context.saved_games, &mut missing);
     path = replace_token(path, "<winPublic>", &context.public, &mut missing);
@@ -501,9 +512,7 @@ fn find_steam_library_paths(steam_path: &Path) -> Vec<PathBuf> {
 }
 
 fn read_libraryfolders_value(steam_path: &Path) -> Option<Vec<PathBuf>> {
-    let library_file = steam_path
-        .join("steamapps")
-        .join("libraryfolders.vdf");
+    let library_file = steam_path.join("steamapps").join("libraryfolders.vdf");
     let text = fs::read_to_string(library_file).ok()?;
     let mut paths = Vec::new();
     for line in text.lines() {

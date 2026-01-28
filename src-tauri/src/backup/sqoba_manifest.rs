@@ -70,6 +70,7 @@ impl SqobaManifest {
 
 const CACHE_FILE_NAME: &str = "sqoba_manifest.json";
 
+#[allow(dead_code)]
 pub fn load_manifest() -> Result<SqobaManifest, String> {
     let manifest = load_manifest_optional()?;
     manifest.ok_or_else(|| "SQOBA manifest not found in example data".to_string())
@@ -81,6 +82,7 @@ pub fn load_manifest_optional() -> Result<Option<SqobaManifest>, String> {
     load_manifest_optional_with_paths(&cache_path, &example_root)
 }
 
+#[allow(dead_code)]
 pub fn load_manifest_with_paths(
     cache_path: &Path,
     example_root: &Path,
@@ -164,7 +166,10 @@ fn candidate_manifest_paths(example_root: &Path) -> Vec<PathBuf> {
             .join("manifest.yaml"),
         example_root.join("ludusavi").join("manifest.yaml"),
         example_root.join("ludusavi").join("manifest.yml"),
-        example_root.join("ludusavi").join("data").join("manifest.yaml"),
+        example_root
+            .join("ludusavi")
+            .join("data")
+            .join("manifest.yaml"),
         example_root.join("manifest.json"),
         example_root.join("manifest.yaml"),
         example_root.join("manifest.yml"),
@@ -277,7 +282,11 @@ fn manifest_from_yaml(text: &str) -> Result<SqobaManifest, String> {
         }
 
         let game_manifest = SqobaGame {
-            files: if files_map.is_empty() { None } else { Some(files_map) },
+            files: if files_map.is_empty() {
+                None
+            } else {
+                Some(files_map)
+            },
             registry: None,
         };
         games.insert(name, game_manifest);
@@ -336,8 +345,23 @@ pub fn normalize_name(name: &str) -> String {
     let re = regex::Regex::new(r"[^a-z0-9]+").unwrap();
     let cleaned = re.replace_all(&lower, " ");
     let stop_words = [
-        "the", "a", "an", "edition", "definitive", "remastered", "goty", "game", "of", "year",
-        "ultimate", "complete", "collection", "bundle", "deluxe", "enhanced", "hd",
+        "the",
+        "a",
+        "an",
+        "edition",
+        "definitive",
+        "remastered",
+        "goty",
+        "game",
+        "of",
+        "year",
+        "ultimate",
+        "complete",
+        "collection",
+        "bundle",
+        "deluxe",
+        "enhanced",
+        "hd",
     ];
     let tokens: Vec<&str> = cleaned
         .split_whitespace()
