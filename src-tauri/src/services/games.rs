@@ -180,8 +180,9 @@ pub fn get_all_games<D: Db>(db: &D) -> Result<Vec<Game>, String> {
 
 pub fn get_favorites<D: Db>(db: &D) -> Result<Vec<Game>, String> {
     db.with_conn(|conn| {
-        let mut stmt =
-            conn.prepare(&format!("{GAME_SELECT} WHERE is_favorite = 1 ORDER BY name ASC"))?;
+        let mut stmt = conn.prepare(&format!(
+            "{GAME_SELECT} WHERE is_favorite = 1 ORDER BY name ASC"
+        ))?;
 
         let games = stmt
             .query_map([], map_game_row)?
@@ -374,11 +375,7 @@ pub fn resolve_shortcut_target(path: String) -> Result<String, String> {
     }
 }
 
-pub fn is_game_installed<D: Db, F: FileSystem>(
-    db: &D,
-    fs: &F,
-    id: String,
-) -> Result<bool, String> {
+pub fn is_game_installed<D: Db, F: FileSystem>(db: &D, fs: &F, id: String) -> Result<bool, String> {
     let exe_path = fetch_exe_path(db, &id)?;
     Ok(fs.exists(Path::new(&exe_path)))
 }

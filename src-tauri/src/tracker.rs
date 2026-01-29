@@ -8,7 +8,6 @@ pub fn start_tracker(app: AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::database::{set_test_db, TestDbGuard, TEST_DB_MUTEX};
     use crate::db::GlobalDb;
     use crate::services::tracker::{Clock, TrackerService, UPDATE_INTERVAL_SECS};

@@ -19,20 +19,19 @@ impl Db for GlobalDb {
     }
 }
 
+#[cfg(test)]
 pub struct ConnectionDb {
     conn: Connection,
 }
 
+#[cfg(test)]
 impl ConnectionDb {
     pub fn new(conn: Connection) -> Self {
         Self { conn }
     }
-
-    pub fn into_inner(self) -> Connection {
-        self.conn
-    }
 }
 
+#[cfg(test)]
 impl Db for ConnectionDb {
     fn with_conn<T, F>(&self, f: F) -> Result<T>
     where

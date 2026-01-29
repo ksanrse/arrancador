@@ -461,9 +461,7 @@ mod tests {
         );
         let manifest = SqobaManifest { games };
 
-        let found = manifest
-            .find_game_entry("witcher 3")
-            .expect("find game");
+        let found = manifest.find_game_entry("witcher 3").expect("find game");
         assert_eq!(found.0, "The Witcher 3: Game of the Year Edition");
     }
 }

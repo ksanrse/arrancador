@@ -26,11 +26,7 @@ pub struct ProcessEntry {
     pub gpu_usage: f32,
 }
 
-fn scan_executables_with_callback<P, F>(
-    dir: P,
-    cancel_flag: &AtomicBool,
-    mut on_entry: F,
-) -> usize
+fn scan_executables_with_callback<P, F>(dir: P, cancel_flag: &AtomicBool, mut on_entry: F) -> usize
 where
     P: AsRef<std::path::Path>,
     F: FnMut(ExeEntry),

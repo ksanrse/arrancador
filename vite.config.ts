@@ -39,6 +39,12 @@ export default defineConfig(async () => ({
     },
   },
 
+  preview: {
+    host: "127.0.0.1",
+    port: 4174,
+    strictPort: true,
+  },
+
   test: {
     environment: "jsdom",
     globals: true,
@@ -50,10 +56,10 @@ export default defineConfig(async () => ({
       reporter: ["text", "lcov"],
       reportsDirectory: "coverage",
       thresholds: {
-        lines: 0,
-        functions: 0,
-        branches: 0,
-        statements: 0,
+        lines: 45,
+        functions: 40,
+        branches: 30,
+        statements: 45,
       },
     },
   },

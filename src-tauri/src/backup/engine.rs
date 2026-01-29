@@ -1,7 +1,7 @@
 use crate::backup::save_locator::{locate_game_saves, SaveDiscovery};
 use crate::backup::sqoba_manifest::{SqobaGame, SqobaManifest};
-use rayon::prelude::*;
 use lazy_static::lazy_static;
+use rayon::prelude::*;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -24,8 +24,7 @@ const MANIFEST_VERSION: u32 = 2;
 const LUDUSAVI_MAPPING_NAME: &str = "mapping.yaml";
 
 lazy_static! {
-    static ref DRIVE_REGEX: Regex =
-        Regex::new(r"^([A-Za-z]):[\\/](.*)$").expect("drive regex");
+    static ref DRIVE_REGEX: Regex = Regex::new(r"^([A-Za-z]):[\\/](.*)$").expect("drive regex");
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

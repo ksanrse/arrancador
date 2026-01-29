@@ -633,8 +633,8 @@ mod tests {
 
         let save_path = save_dir.to_string_lossy().to_string();
         let discovery = locate_game_saves("Test Game", None, Some(&save_path))
-        .expect("locate saves")
-        .expect("discovery present");
+            .expect("locate saves")
+            .expect("discovery present");
 
         assert_eq!(discovery.files.len(), 2);
         assert!(discovery.total_size > 0);

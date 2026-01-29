@@ -59,5 +59,5 @@ test("scan flow emits entries from mocked backend", async ({ page }) => {
   await page.goto("/scan");
   await page.getByTestId("scan-start").click();
 
-  await expect(page.getByDisplayValue("Elysium")).toBeVisible();
+  await expect(page.locator('input[value="Elysium"]')).toBeVisible();
 });

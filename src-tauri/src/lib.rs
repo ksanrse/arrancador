@@ -1,15 +1,15 @@
 mod backup;
-mod db;
 mod database;
+mod db;
 mod domain;
 mod games;
 mod metadata;
 mod scan;
+mod services;
 mod settings;
 mod stats;
 mod system;
 mod tracker;
-mod services;
 
 use backup::*;
 use database::init_database;
