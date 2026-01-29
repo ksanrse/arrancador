@@ -59,5 +59,7 @@ test("scan flow emits entries from mocked backend", async ({ page }) => {
   await page.goto("/scan");
   await page.getByTestId("scan-start").click();
 
-  await expect(page.getByTestId("scan-entry-name")).toHaveValue("Elysium");
+  await expect(page.getByTestId("scan-entry-name").first()).toHaveValue(
+    "Elysium",
+  );
 });
