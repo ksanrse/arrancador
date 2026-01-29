@@ -263,7 +263,7 @@ fn manifest_from_yaml(text: &str) -> Result<SqobaManifest, String> {
         let mut files_map: HashMap<String, Vec<String>> = HashMap::new();
         if let Some(files) = game_val
             .as_mapping()
-            .and_then(|m| m.get(&YamlValue::from("files")))
+            .and_then(|m| m.get(YamlValue::from("files")))
             .and_then(|v| v.as_mapping())
         {
             for (path_key, meta_val) in files {
@@ -298,7 +298,7 @@ fn manifest_from_yaml(text: &str) -> Result<SqobaManifest, String> {
 fn extract_tags(meta: &YamlValue) -> Vec<String> {
     if let Some(tags) = meta
         .as_mapping()
-        .and_then(|m| m.get(&YamlValue::from("tags")))
+        .and_then(|m| m.get(YamlValue::from("tags")))
         .and_then(|v| v.as_sequence())
     {
         let mut out = Vec::new();
@@ -317,7 +317,7 @@ fn extract_tags(meta: &YamlValue) -> Vec<String> {
 fn is_path_applicable(meta: &YamlValue) -> bool {
     let when = meta
         .as_mapping()
-        .and_then(|m| m.get(&YamlValue::from("when")))
+        .and_then(|m| m.get(YamlValue::from("when")))
         .and_then(|v| v.as_sequence());
     if when.is_none() {
         return true;
@@ -325,7 +325,7 @@ fn is_path_applicable(meta: &YamlValue) -> bool {
 
     for cond in when.unwrap() {
         if let Some(map) = cond.as_mapping() {
-            if let Some(os_val) = map.get(&YamlValue::from("os")).and_then(|v| v.as_str()) {
+            if let Some(os_val) = map.get(YamlValue::from("os")).and_then(|v| v.as_str()) {
                 let os = os_val.to_lowercase();
                 if os == "windows" || os == "win" {
                     return true;

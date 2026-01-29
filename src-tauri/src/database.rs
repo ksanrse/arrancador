@@ -148,10 +148,8 @@ fn ensure_game_columns(conn: &Connection) -> Result<()> {
     let mut stmt = conn.prepare("PRAGMA table_info(games)")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
     let mut cols = std::collections::HashSet::new();
-    for r in rows {
-        if let Ok(name) = r {
-            cols.insert(name);
-        }
+    for name in rows.flatten() {
+        cols.insert(name);
     }
 
     if !cols.contains("user_rating") {

@@ -1,4 +1,4 @@
-import { listen } from "@tauri-apps/api/event";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { openPath } from "@tauri-apps/plugin-opener";
 import {
@@ -36,6 +36,14 @@ import { backupApi, gamesApi, metadataApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { useGames } from "@/store/GamesContext";
 import type { Backup, Game, RawgGame, RestoreCheck } from "@/types";
+
+type BackupProgressPayload = {
+  game_id: string;
+  stage: string;
+  message: string;
+  done: number;
+  total: number;
+};
 
 function formatPlaytime(seconds: number) {
   if (!seconds) return "0 ч";
@@ -75,7 +83,7 @@ export default function GameDetail() {
   // Backups
   const [backups, setBackups] = useState<Backup[]>([]);
   const [loadingBackups, setLoadingBackups] = useState(false);
-  const [creatingBackup, setCreatingBackup] = useState(false);
+  const [, setCreatingBackup] = useState(false);
   const [showBackupPrompt, setShowBackupPrompt] = useState(false);
   const [savePathDraft, setSavePathDraft] = useState("");
   const [savingSavePath, setSavingSavePath] = useState(false);
@@ -120,6 +128,7 @@ export default function GameDetail() {
     { value: 6, label: "6", desc: "Отлично, рекомендую" },
     { value: 7, label: "7", desc: "Шедевр, топ" },
   ];
+  void ratingLevels;
 
   const displayRating = showRatingModal ? ratingDraft : userRating;
 
@@ -240,11 +249,13 @@ export default function GameDetail() {
 
   useEffect(() => {
     if (!game) return;
-    let unlistenBackup = null;
-    let unlistenRestore = null;
+    let unlistenBackup: UnlistenFn | null = null;
+    let unlistenRestore: UnlistenFn | null = null;
     const setup = async () => {
-      unlistenBackup = await listen("backup:progress", (event) => {
-        const payload = event.payload;
+      unlistenBackup = await listen<BackupProgressPayload>(
+        "backup:progress",
+        (event) => {
+          const payload = event.payload;
         if (payload.game_id !== game.id) return;
         const { stage, message, done, total } = payload;
         if (stage === "done") {
@@ -252,9 +263,12 @@ export default function GameDetail() {
         } else {
           setBackupProgress({ active: true, stage, message, done, total });
         }
-      });
-      unlistenRestore = await listen("restore:progress", (event) => {
-        const payload = event.payload;
+        }
+      );
+      unlistenRestore = await listen<BackupProgressPayload>(
+        "restore:progress",
+        (event) => {
+          const payload = event.payload;
         if (payload.game_id !== game.id) return;
         const { stage, message, done, total } = payload;
         if (stage === "done") {
@@ -262,7 +276,8 @@ export default function GameDetail() {
         } else {
           setBackupProgress({ active: true, stage, message, done, total });
         }
-      });
+        }
+      );
     };
     setup();
     return () => {
@@ -1145,7 +1160,10 @@ export default function GameDetail() {
                 }
               </div>
             </div>
-            <Button onClick={handleSaveUserRating} disabled={savingUserRating}>
+            <Button
+              onClick={() => void handleSaveUserRating()}
+              disabled={savingUserRating}
+            >
               {savingUserRating ? (
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
               ) : null}

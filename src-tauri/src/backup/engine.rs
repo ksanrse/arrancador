@@ -344,7 +344,7 @@ impl BackupEngine {
                             }
                             let done = counter.fetch_add(1, Ordering::SeqCst) + 1;
                             if let Some(cb) = &progress_ref {
-                                if done == total || done % 50 == 0 {
+                                if done == total || done.is_multiple_of(50) {
                                     cb(BackupProgress {
                                         stage: "restore",
                                         current: target.to_string_lossy().to_string(),
@@ -420,7 +420,7 @@ impl BackupEngine {
                         self.copy_file_to_backup(destination, &file.path, &file.backup_path)?;
                     let done = counter.fetch_add(1, Ordering::SeqCst) + 1;
                     if let Some(cb) = &progress_ref {
-                        if done == total || done % 50 == 0 {
+                        if done == total || done.is_multiple_of(50) {
                             cb(BackupProgress {
                                 stage: "copy",
                                 current: file.path.to_string_lossy().to_string(),
@@ -601,7 +601,7 @@ impl BackupEngine {
             inverse.insert(prefix.clone(), key.clone());
         }
 
-        for (original, _) in &backup.files {
+        for original in backup.files.keys() {
             let (drive_key, rel) = split_drive_for_restore(original, &inverse);
             let source_path =
                 backup_root.join(path_from_backup_rel(&format!("{}/{}", drive_key, rel)));

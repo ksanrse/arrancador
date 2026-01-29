@@ -202,7 +202,7 @@ fn collect_wmi_monitor_info() -> HashMap<String, WmiMonitorInfo> {
             return map;
         }
     };
-    let wmi = match WMIConnection::with_namespace_path("ROOT\\WMI", com.into()) {
+    let wmi = match WMIConnection::with_namespace_path("ROOT\\WMI", com) {
         Ok(wmi) => wmi,
         Err(err) => {
             eprintln!("WMI connection failed (ROOT\\\\WMI): {:?}", err);
@@ -384,8 +384,10 @@ fn collect_display_info() -> (Vec<GpuInfo>, Vec<MonitorInfo>) {
 
     let mut adapter_index = 0;
     loop {
-        let mut adapter = DISPLAY_DEVICEW::default();
-        adapter.cb = std::mem::size_of::<DISPLAY_DEVICEW>() as u32;
+        let mut adapter = DISPLAY_DEVICEW {
+            cb: std::mem::size_of::<DISPLAY_DEVICEW>() as u32,
+            ..Default::default()
+        };
         let adapter_ok = unsafe {
             EnumDisplayDevicesW(PCWSTR::null(), adapter_index, &mut adapter, 0).as_bool()
         };
@@ -409,8 +411,10 @@ fn collect_display_info() -> (Vec<GpuInfo>, Vec<MonitorInfo>) {
 
         let mut monitor_index = 0;
         loop {
-            let mut monitor = DISPLAY_DEVICEW::default();
-            monitor.cb = std::mem::size_of::<DISPLAY_DEVICEW>() as u32;
+            let mut monitor = DISPLAY_DEVICEW {
+                cb: std::mem::size_of::<DISPLAY_DEVICEW>() as u32,
+                ..Default::default()
+            };
             let monitor_ok = unsafe {
                 EnumDisplayDevicesW(
                     PCWSTR::from_raw(adapter.DeviceName.as_ptr()),
@@ -462,8 +466,10 @@ fn collect_display_info() -> (Vec<GpuInfo>, Vec<MonitorInfo>) {
             let mut width = 0;
             let mut height = 0;
             let mut refresh_rate = 0;
-            let mut devmode = DEVMODEW::default();
-            devmode.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+            let mut devmode = DEVMODEW {
+                dmSize: std::mem::size_of::<DEVMODEW>() as u16,
+                ..Default::default()
+            };
             let settings_ok = unsafe {
                 EnumDisplaySettingsW(
                     if monitor.DeviceName[0] != 0 {

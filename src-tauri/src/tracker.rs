@@ -97,10 +97,8 @@ fn update_games_cache(cache: &mut Vec<GameInfo>) {
         })?;
 
         let mut new_cache = Vec::new();
-        for row in rows {
-            if let Ok(info) = row {
-                new_cache.push(info);
-            }
+        for info in rows.flatten() {
+            new_cache.push(info);
         }
         Ok(new_cache)
     });

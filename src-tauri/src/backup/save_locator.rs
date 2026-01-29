@@ -290,7 +290,7 @@ fn expand_env_vars(path: &str) -> String {
     while let Some(ch) = chars.next() {
         if ch == '%' {
             let mut key = String::new();
-            while let Some(next) = chars.next() {
+            for next in chars.by_ref() {
                 if next == '%' {
                     break;
                 }
@@ -565,10 +565,8 @@ fn find_steam_app_ids(game_name: &str, library_paths: &[PathBuf]) -> Vec<String>
                 };
                 let normalized = normalize_name(&name);
                 let score = similarity_score(&target, &normalized);
-                if score >= 0.7 {
-                    if seen.insert(app_id.clone()) {
-                        app_ids.push(app_id);
-                    }
+                if score >= 0.7 && seen.insert(app_id.clone()) {
+                    app_ids.push(app_id);
                 }
             }
         }

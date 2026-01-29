@@ -197,3 +197,11 @@ pub fn run() {
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
+#[cfg(test)]
+mod smoke_tests {
+    #[test]
+    fn smoke_test_harness_runs() {
+        assert_eq!(2 + 2, 4);
+    }
+}

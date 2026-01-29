@@ -453,7 +453,7 @@ pub fn resolve_shortcut_target(path: String) -> Result<String, String> {
     #[cfg(target_os = "windows")]
     {
         let resolved = resolve_shortcut_windows(&input)?;
-        return Ok(resolved.to_string_lossy().to_string());
+        Ok(resolved.to_string_lossy().to_string())
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -514,10 +514,8 @@ pub fn kill_game_processes(id: String) -> Result<u32, String> {
     let mut killed = 0u32;
     for process in sys.processes().values() {
         if let Some(path) = process.exe() {
-            if paths_match(path, &target) {
-                if process.kill() {
-                    killed += 1;
-                }
+            if paths_match(path, &target) && process.kill() {
+                killed += 1;
             }
         }
     }

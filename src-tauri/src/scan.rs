@@ -26,7 +26,6 @@ pub struct ProcessEntry {
     pub gpu_usage: f32,
 }
 
-
 #[tauri::command]
 pub fn get_running_processes() -> Vec<ProcessEntry> {
     let mut sys = System::new_all();

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ComponentProps } from "react";
 import {
   Area,
   AreaChart,
@@ -262,14 +262,27 @@ export default function Statistics() {
     );
   }
 
-  const tooltipFormatter = (
-    _value: number,
-    _name: string,
-    props: { payload?: { seconds?: number } }
-  ) => [
-    formatDuration(props.payload?.seconds ?? 0),
-    "\u0412\u0440\u0435\u043c\u044f",
-  ];
+  type TooltipFormatter = NonNullable<ComponentProps<typeof Tooltip>["formatter"]>;
+  type TooltipLabelFormatter = NonNullable<
+    ComponentProps<typeof Tooltip>["labelFormatter"]
+  >;
+
+  const tooltipFormatter: TooltipFormatter = (_value, _name, item) => {
+    const payloadSeconds =
+      typeof item === "object" && item && "payload" in item
+        ? // Recharts doesn't expose a stable payload type here.
+          // We only need the single optional field we control.
+          (item as { payload?: { seconds?: number } }).payload?.seconds
+        : undefined;
+
+    return [
+      formatDuration(payloadSeconds ?? 0),
+      "\u0412\u0440\u0435\u043c\u044f",
+    ] as [string, string];
+  };
+
+  const tooltipLabelFormatter: TooltipLabelFormatter = (label) =>
+    formatDateLong(String(label ?? ""));
 
   return (
     <div className="p-4 sm:p-6 space-y-6">
@@ -473,7 +486,7 @@ export default function Statistics() {
                     itemStyle={tooltipItemStyle}
                     cursor={{ fill: "transparent" }}
                     formatter={tooltipFormatter}
-                    labelFormatter={formatDateLong}
+                    labelFormatter={tooltipLabelFormatter}
                   />
                   <Area
                     type="monotone"

@@ -57,7 +57,8 @@ Planning output note:
 
 Replace the placeholder Implementation step with actionable, test-first milestones.
 
-### [ ] Step: Baseline And Guardrails
+### [x] Step: Baseline And Guardrails
+<!-- chat-id: 4263868f-cf25-4121-bf9c-154b67907920 -->
 
 Goal: establish a repeatable, fast feedback loop before touching logic.
 
