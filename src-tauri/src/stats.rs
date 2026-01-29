@@ -31,7 +31,10 @@ fn parse_date(input: &str) -> Option<NaiveDate> {
 }
 
 #[tauri::command]
-pub fn get_playtime_stats(start: Option<String>, end: Option<String>) -> Result<PlaytimeStats, String> {
+pub fn get_playtime_stats(
+    start: Option<String>,
+    end: Option<String>,
+) -> Result<PlaytimeStats, String> {
     let mut end_date = end
         .as_deref()
         .and_then(parse_date)
@@ -61,10 +64,8 @@ pub fn get_playtime_stats(start: Option<String>, end: Option<String>) -> Result<
         let rows = daily_stmt.query_map(params![&range_start, &range_end], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
         })?;
-        for row in rows {
-            if let Ok((date, seconds)) = row {
-                daily_map.insert(date, seconds);
-            }
+        for (date, seconds) in rows.flatten() {
+            daily_map.insert(date, seconds);
         }
 
         let mut daily_totals = Vec::new();

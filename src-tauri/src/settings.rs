@@ -118,10 +118,7 @@ pub fn update_settings(settings: AppSettings) -> Result<(), String> {
                 }
                 .to_string(),
             ),
-            (
-                "backup_compression_level",
-                compression_level.to_string(),
-            ),
+            ("backup_compression_level", compression_level.to_string()),
             (
                 "backup_skip_compression_once",
                 if settings.backup_skip_compression_once {
@@ -131,10 +128,7 @@ pub fn update_settings(settings: AppSettings) -> Result<(), String> {
                 }
                 .to_string(),
             ),
-            (
-                "max_backups_per_game",
-                max_backups.to_string(),
-            ),
+            ("max_backups_per_game", max_backups.to_string()),
             ("rawg_api_key", settings.rawg_api_key),
         ];
 

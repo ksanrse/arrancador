@@ -389,10 +389,10 @@ fn load_disk_type(letter: &str) -> Option<DiskType> {
     })
     .ok()
     .flatten()
-    .and_then(|v| match v.as_str() {
-        "hdd" => Some(DiskType::Hdd),
-        "ssd" => Some(DiskType::Ssd),
-        _ => Some(DiskType::Unknown),
+    .map(|v| match v.as_str() {
+        "hdd" => DiskType::Hdd,
+        "ssd" => DiskType::Ssd,
+        _ => DiskType::Unknown,
     })
 }
 
@@ -643,14 +643,10 @@ pub fn find_game_saves(
                 .map(|root| root.path.to_string_lossy().to_string());
             let mut save_path = save_override.clone().or_else(|| first_root.clone());
 
-            if save_override.is_none() {
-                if discovery.roots.len() == 1 {
-                    if let (Some(game_id), Some(candidate)) =
-                        (game_id.as_deref(), first_root.clone())
-                    {
-                        if set_game_save_path(game_id, &candidate).is_ok() {
-                            save_path = Some(candidate);
-                        }
+            if save_override.is_none() && discovery.roots.len() == 1 {
+                if let (Some(game_id), Some(candidate)) = (game_id.as_deref(), first_root.clone()) {
+                    if set_game_save_path(game_id, &candidate).is_ok() {
+                        save_path = Some(candidate);
                     }
                 }
             }

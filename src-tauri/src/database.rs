@@ -6,6 +6,29 @@ lazy_static::lazy_static! {
     pub static ref DB: Mutex<Option<Connection>> = Mutex::new(None);
 }
 
+#[cfg(test)]
+lazy_static::lazy_static! {
+    pub(crate) static ref TEST_DB_MUTEX: Mutex<()> = Mutex::new(());
+}
+
+#[cfg(test)]
+pub(crate) struct TestDbGuard;
+
+#[cfg(test)]
+impl Drop for TestDbGuard {
+    fn drop(&mut self) {
+        let mut db = DB.lock().unwrap();
+        *db = None;
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn set_test_db(conn: Connection) -> TestDbGuard {
+    let mut db = DB.lock().unwrap();
+    *db = Some(conn);
+    TestDbGuard
+}
+
 pub fn get_db_path() -> PathBuf {
     let app_data = dirs::data_local_dir().unwrap_or_else(|| PathBuf::from("."));
     let db_dir = app_data.join("arrancador");
@@ -19,6 +42,16 @@ pub fn init_database() -> Result<()> {
 
     let conn = Connection::open(&db_path)?;
 
+    init_schema(&conn)?;
+
+    let mut db = DB.lock().unwrap();
+    *db = Some(conn);
+
+    println!("Database initialized successfully");
+    Ok(())
+}
+
+pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
     // Games table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS games (
@@ -61,7 +94,8 @@ pub fn init_database() -> Result<()> {
         [],
     )?;
 
-    ensure_game_columns(&conn)?;
+    ensure_game_columns(conn)?;
+    ensure_game_indexes(conn)?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS playtime_daily (
@@ -96,6 +130,7 @@ pub fn init_database() -> Result<()> {
         )",
         [],
     )?;
+    ensure_backup_indexes(conn)?;
 
     // Settings table
     conn.execute(
@@ -137,10 +172,6 @@ pub fn init_database() -> Result<()> {
         )?;
     }
 
-    let mut db = DB.lock().unwrap();
-    *db = Some(conn);
-
-    println!("Database initialized successfully");
     Ok(())
 }
 
@@ -148,10 +179,8 @@ fn ensure_game_columns(conn: &Connection) -> Result<()> {
     let mut stmt = conn.prepare("PRAGMA table_info(games)")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
     let mut cols = std::collections::HashSet::new();
-    for r in rows {
-        if let Ok(name) = r {
-            cols.insert(name);
-        }
+    for name in rows.flatten() {
+        cols.insert(name);
     }
 
     if !cols.contains("user_rating") {
@@ -173,6 +202,26 @@ fn ensure_game_columns(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+fn ensure_game_indexes(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_games_name ON games(name)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_games_favorite_name ON games(is_favorite, name)",
+        [],
+    )?;
+    Ok(())
+}
+
+fn ensure_backup_indexes(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_backups_game_created ON backups(game_id, created_at DESC)",
+        [],
+    )?;
+    Ok(())
+}
+
 pub fn with_db<F, T>(f: F) -> Result<T>
 where
     F: FnOnce(&Connection) -> Result<T>,
@@ -180,4 +229,43 @@ where
     let db = DB.lock().unwrap();
     let conn = db.as_ref().ok_or(rusqlite::Error::InvalidQuery)?;
     f(conn)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rusqlite::Connection;
+    use std::collections::HashSet;
+
+    #[test]
+    fn ensure_game_columns_adds_missing_fields_and_is_idempotent() {
+        let conn = Connection::open_in_memory().expect("open in-memory db");
+        conn.execute(
+            "CREATE TABLE games (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                exe_path TEXT NOT NULL UNIQUE,
+                exe_name TEXT NOT NULL,
+                date_added TEXT NOT NULL
+            )",
+            [],
+        )
+        .expect("create games table");
+
+        ensure_game_columns(&conn).expect("ensure columns");
+        ensure_game_columns(&conn).expect("ensure columns second time");
+
+        let mut stmt = conn
+            .prepare("PRAGMA table_info(games)")
+            .expect("pragma table_info");
+        let columns: HashSet<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))
+            .expect("query columns")
+            .flatten()
+            .collect();
+
+        for column in ["user_rating", "user_note", "save_path", "save_path_checked"] {
+            assert!(columns.contains(column));
+        }
+    }
 }

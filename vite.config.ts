@@ -38,4 +38,29 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+
+  preview: {
+    host: "127.0.0.1",
+    port: 4174,
+    strictPort: true,
+  },
+
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["./src/test/setup.ts"],
+    include: ["src/test/**/*.{test,spec}.{ts,tsx}"],
+    exclude: ["e2e/**"],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "lcov"],
+      reportsDirectory: "coverage",
+      thresholds: {
+        lines: 45,
+        functions: 40,
+        branches: 30,
+        statements: 45,
+      },
+    },
+  },
 }));

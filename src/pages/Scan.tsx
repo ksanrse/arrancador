@@ -22,7 +22,7 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { gamesApi, scanApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useGames } from "@/store/GamesContext";
+import { useGamesActions } from "@/store/GamesContext";
 import type { ExeEntry, NewGame } from "@/types";
 
 interface ScanResult extends ExeEntry {
@@ -34,7 +34,7 @@ interface ScanResult extends ExeEntry {
 }
 
 export default function Scan() {
-  const { addGames, refreshGames } = useGames();
+  const { addGames, refreshGames } = useGamesActions();
   const { notify } = useToast();
   const [activeTab, setActiveTab] = useState<"folders" | "processes">(
     "folders",
@@ -520,7 +520,11 @@ export default function Scan() {
               </div>
             </>
           ) : (
-            <Button onClick={startScan} className="gap-2 w-full sm:w-auto">
+            <Button
+              onClick={startScan}
+              className="gap-2 w-full sm:w-auto"
+              data-testid="scan-start"
+            >
               <FolderOpen className="w-4 h-4" />
               Выбрать папку
             </Button>
@@ -699,6 +703,7 @@ export default function Scan() {
                           onChange={(e) =>
                             updateName(activeTab, result.path, e.target.value)
                           }
+                          data-testid="scan-entry-name"
                           className="font-semibold bg-transparent border-none focus:outline-none p-0 text-sm sm:text-base w-fit max-w-full focus:ring-0 truncate hover:bg-accent/50 rounded px-1 -ml-1 transition-colors"
                           style={{
                             width: `${Math.max(result.customName.length, 1)}ch`,

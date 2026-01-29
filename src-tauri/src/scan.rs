@@ -26,6 +26,44 @@ pub struct ProcessEntry {
     pub gpu_usage: f32,
 }
 
+fn scan_executables_with_callback<P, F>(dir: P, cancel_flag: &AtomicBool, mut on_entry: F) -> usize
+where
+    P: AsRef<std::path::Path>,
+    F: FnMut(ExeEntry),
+{
+    let walker = WalkDirGeneric::<((), u8)>::new(dir).process_read_dir(|_, _, _, children| {
+        children.iter_mut().for_each(|dir_entry_result| {
+            if let Ok(dir_entry) = dir_entry_result {
+                if dir_entry.file_name().to_string_lossy().starts_with('.') {
+                    dir_entry.read_children_path = None;
+                }
+            }
+        });
+    });
+
+    let mut count = 0;
+    for entry in walker {
+        if cancel_flag.load(Ordering::Relaxed) {
+            break;
+        }
+        if let Ok(entry) = entry {
+            if entry.file_type().is_file() {
+                let path = entry.path();
+                if let Some(ext) = path.extension() {
+                    if ext.eq_ignore_ascii_case("exe") {
+                        let data = ExeEntry {
+                            file_name: entry.file_name().to_string_lossy().into(),
+                            path: path.display().to_string(),
+                        };
+                        on_entry(data);
+                        count += 1;
+                    }
+                }
+            }
+        }
+    }
+    count
+}
 
 #[tauri::command]
 pub fn get_running_processes() -> Vec<ProcessEntry> {
@@ -68,37 +106,9 @@ pub fn scan_executables_stream(app: AppHandle, dir: String) {
     }
 
     tauri::async_runtime::spawn_blocking(move || {
-        let walker = WalkDirGeneric::<((), u8)>::new(&dir).process_read_dir(|_, _, _, children| {
-            children.iter_mut().for_each(|dir_entry_result| {
-                if let Ok(dir_entry) = dir_entry_result {
-                    if dir_entry.file_name().to_string_lossy().starts_with('.') {
-                        dir_entry.read_children_path = None;
-                    }
-                }
-            });
+        let count = scan_executables_with_callback(&dir, &cancel_flag, |data| {
+            let _ = app.emit("scan:entry", &data);
         });
-
-        let mut count = 0;
-        for entry in walker {
-            if cancel_flag.load(Ordering::Relaxed) {
-                break;
-            }
-            if let Ok(entry) = entry {
-                if entry.file_type().is_file() {
-                    let path = entry.path();
-                    if let Some(ext) = path.extension() {
-                        if ext.eq_ignore_ascii_case("exe") {
-                            let data = ExeEntry {
-                                file_name: entry.file_name().to_string_lossy().into(),
-                                path: path.display().to_string(),
-                            };
-                            let _ = app.emit("scan:entry", &data);
-                            count += 1;
-                        }
-                    }
-                }
-            }
-        }
         let _ = app.emit("scan:done", count);
         {
             let mut writer = CANCEL_SCAN_FLAG.write().unwrap();
@@ -111,5 +121,43 @@ pub fn scan_executables_stream(app: AppHandle, dir: String) {
 pub fn cancel_scan() {
     if let Some(flag) = CANCEL_SCAN_FLAG.read().unwrap().as_ref() {
         flag.store(true, Ordering::Relaxed);
+    }
+}
+
+#[cfg(test)]
+mod perf_bench {
+    use super::*;
+    use std::fs;
+    use std::time::Instant;
+    use tempfile::Builder;
+
+    #[test]
+    #[ignore]
+    fn perf_bench_scan_executables() {
+        let root = Builder::new()
+            .prefix("scan-perf")
+            .tempdir()
+            .expect("tempdir");
+        for dir_index in 0..10 {
+            let dir = root.path().join(format!("dir-{dir_index}"));
+            fs::create_dir_all(&dir).expect("create dir");
+            for file_index in 0..100 {
+                let exe = dir.join(format!("game-{dir_index}-{file_index}.exe"));
+                let txt = dir.join(format!("readme-{dir_index}-{file_index}.txt"));
+                fs::write(exe, b"data").expect("write exe");
+                fs::write(txt, b"data").expect("write txt");
+            }
+        }
+
+        let cancel = AtomicBool::new(false);
+        let start = Instant::now();
+        let count = scan_executables_with_callback(root.path(), &cancel, |_| {});
+        let elapsed = start.elapsed();
+
+        println!(
+            "perf: scan_executables entries={} duration_ms={}",
+            count,
+            elapsed.as_millis()
+        );
     }
 }
