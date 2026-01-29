@@ -30,4 +30,5 @@ dist
 .vscode
 playwright-report
 test-results
+coverage
 

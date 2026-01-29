@@ -203,7 +203,8 @@ Goal: catch “wiring” regressions that unit tests can’t.
 Verification:
 - `pnpm test:e2e` (or documented manual run steps)
 
-### [ ] Step: CI And Regression Gates
+### [x] Step: CI And Regression Gates
+<!-- chat-id: 356e8032-a8fd-42a7-b601-304dc4757684 -->
 
 Goal: prevent future bugs from landing.
 
