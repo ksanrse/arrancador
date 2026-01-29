@@ -73,7 +73,8 @@ Verification:
 - `cd src-tauri; cargo fmt --check`
 - `cd src-tauri; cargo clippy -- -D warnings`
 
-### [ ] Step: Define Test Strategy And Contracts
+### [x] Step: Define Test Strategy And Contracts
+<!-- chat-id: 88d1a7b3-616b-4077-912a-497e2b8965f5 -->
 
 Goal: make critical behaviors explicit and hard to regress.
 
