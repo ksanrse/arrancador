@@ -2,7 +2,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import GameDetail from "@/pages/GameDetail";
-import { useGames } from "@/store/GamesContext";
+import { useGamesActions, useGamesState } from "@/store/GamesContext";
 import { createTestGame } from "@/types";
 
 const {
@@ -39,7 +39,10 @@ const {
   },
 }));
 
-vi.mock("@/store/GamesContext", () => ({ useGames: vi.fn() }));
+vi.mock("@/store/GamesContext", () => ({
+  useGamesActions: vi.fn(),
+  useGamesState: vi.fn(),
+}));
 vi.mock("@/lib/api", () => ({
   gamesApi: gamesApiMock,
   backupApi: backupApiMock,
@@ -54,7 +57,8 @@ vi.mock("@tauri-apps/api/event", () => ({
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 vi.mock("@tauri-apps/plugin-opener", () => ({ openPath: vi.fn() }));
 
-const useGamesMock = vi.mocked(useGames);
+const useGamesActionsMock = vi.mocked(useGamesActions);
+const useGamesStateMock = vi.mocked(useGamesState);
 
 describe("GameDetail", () => {
   beforeEach(() => {
@@ -74,18 +78,20 @@ describe("GameDetail", () => {
     const game = createTestGame({ id: "game-1", name: "Arcadia" });
     toggleFavoriteMock.mockResolvedValue({ ...game, is_favorite: true });
 
-    useGamesMock.mockReturnValue({
+    useGamesStateMock.mockReturnValue({
       games: [game],
       favorites: [],
       loading: false,
       error: null,
+      getGame: vi.fn(),
+    });
+    useGamesActionsMock.mockReturnValue({
       refreshGames: refreshGamesMock,
       addGame: vi.fn(),
       addGames: vi.fn(),
       updateGame: vi.fn(),
       deleteGame: deleteGameMock,
       toggleFavorite: toggleFavoriteMock,
-      getGame: vi.fn(),
       searchGames: vi.fn(),
     });
 

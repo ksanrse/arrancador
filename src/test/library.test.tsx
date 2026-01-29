@@ -2,32 +2,25 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import Library from "@/pages/Library";
-import { useGames } from "@/store/GamesContext";
+import { useGamesState } from "@/store/GamesContext";
 import { testFavoriteGameFixture, testGameFixture } from "@/types";
 
-vi.mock("@/store/GamesContext", () => ({ useGames: vi.fn() }));
+vi.mock("@/store/GamesContext", () => ({ useGamesState: vi.fn() }));
 
-const useGamesMock = vi.mocked(useGames);
+const useGamesStateMock = vi.mocked(useGamesState);
 
 describe("Library", () => {
   beforeEach(() => {
-    useGamesMock.mockReset();
+    useGamesStateMock.mockReset();
   });
 
   it("filters games by search query", async () => {
-    useGamesMock.mockReturnValue({
+    useGamesStateMock.mockReturnValue({
       games: [testGameFixture, testFavoriteGameFixture],
       favorites: [testFavoriteGameFixture],
       loading: false,
       error: null,
-      refreshGames: vi.fn(),
-      addGame: vi.fn(),
-      addGames: vi.fn(),
-      updateGame: vi.fn(),
-      deleteGame: vi.fn(),
-      toggleFavorite: vi.fn(),
       getGame: vi.fn(),
-      searchGames: vi.fn(),
     });
 
     render(
@@ -47,19 +40,12 @@ describe("Library", () => {
   });
 
   it("shows favorites when toggled", async () => {
-    useGamesMock.mockReturnValue({
+    useGamesStateMock.mockReturnValue({
       games: [testGameFixture, testFavoriteGameFixture],
       favorites: [testFavoriteGameFixture],
       loading: false,
       error: null,
-      refreshGames: vi.fn(),
-      addGame: vi.fn(),
-      addGames: vi.fn(),
-      updateGame: vi.fn(),
-      deleteGame: vi.fn(),
-      toggleFavorite: vi.fn(),
       getGame: vi.fn(),
-      searchGames: vi.fn(),
     });
 
     render(

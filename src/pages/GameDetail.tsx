@@ -34,7 +34,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
 import { backupApi, gamesApi, metadataApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useGames } from "@/store/GamesContext";
+import { useGameStatus } from "@/hooks/useGameStatus";
+import { useGamesActions, useGamesState } from "@/store/GamesContext";
 import type { Backup, Game, RawgGame, RestoreCheck } from "@/types";
 
 type BackupProgressPayload = {
@@ -56,7 +57,8 @@ function formatPlaytime(seconds: number) {
 export default function GameDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { games, toggleFavorite, deleteGame, refreshGames } = useGames();
+  const { games } = useGamesState();
+  const { toggleFavorite, deleteGame, refreshGames } = useGamesActions();
 
   const [game, setGame] = useState<Game | null>(null);
 
@@ -101,10 +103,13 @@ export default function GameDetail() {
     done: 0,
     total: 0,
   });
-  const [runningCount, setRunningCount] = useState(0);
-  const [checkingRunning, setCheckingRunning] = useState(false);
-  const [isInstalled, setIsInstalled] = useState(true);
-  const [checkingInstalled, setCheckingInstalled] = useState(false);
+  const {
+    isInstalled,
+    checkingInstalled,
+    runningCount,
+    checkingRunning,
+    setRunningCount,
+  } = useGameStatus(game?.id, game?.exe_path);
   const [userRating, setUserRating] = useState<number | null>(null);
   const [userNote, setUserNote] = useState("");
   const [savingUserRating, setSavingUserRating] = useState(false);
@@ -198,53 +203,9 @@ export default function GameDetail() {
   }, [id, games]);
 
   useEffect(() => {
-    if (!game) return;
-    let mounted = true;
-    setCheckingInstalled(true);
-    gamesApi
-      .isInstalled(game.id)
-      .then((installed) => {
-        if (mounted) setIsInstalled(installed);
-      })
-      .catch((e) => {
-        console.error("Failed to check install status:", e);
-        if (mounted) setIsInstalled(true);
-      })
-      .finally(() => {
-        if (mounted) setCheckingInstalled(false);
-      });
-
-    return () => {
-      mounted = false;
-    };
-  }, [game?.id, game?.exe_path]);
-
-  useEffect(() => {
     if (game) {
       loadBackups();
     }
-  }, [game?.id]);
-
-  useEffect(() => {
-    if (!game) return;
-    let mounted = true;
-    const updateRunning = async () => {
-      try {
-        setCheckingRunning(true);
-        const count = await gamesApi.getRunningInstances(game.id);
-        if (mounted) setRunningCount(count);
-      } catch (e) {
-        console.error("Failed to check running instances:", e);
-      } finally {
-        if (mounted) setCheckingRunning(false);
-      }
-    };
-    updateRunning();
-    const id = setInterval(updateRunning, 5000);
-    return () => {
-      mounted = false;
-      clearInterval(id);
-    };
   }, [game?.id]);
 
   useEffect(() => {

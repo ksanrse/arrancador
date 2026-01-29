@@ -11,7 +11,7 @@ import {
 import { useEffect, useState } from "react";
 import { NavLink, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { useGames } from "@/store/GamesContext";
+import { useGamesState } from "@/store/GamesContext";
 import { ModeToggle } from "./mode-toggle";
 
 const SIDEBAR_STORAGE_KEY = "arrancador_sidebar_collapsed";
@@ -29,7 +29,7 @@ export function Sidebar() {
     if (typeof window === "undefined") return false;
     return window.localStorage.getItem(SIDEBAR_STORAGE_KEY) === "true";
   });
-  const { favorites } = useGames();
+  const { favorites } = useGamesState();
   const location = useLocation();
   const sidebarWidthClass = collapsed
     ? "lg:w-[72px] lg:min-w-[72px]"

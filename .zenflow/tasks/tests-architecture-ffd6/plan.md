@@ -155,7 +155,8 @@ Verification:
 - `cd src-tauri; cargo test`
 - `cd src-tauri; cargo clippy -- -D warnings`
 
-### [ ] Step: Refactor Frontend Data Flow (No Behavior Change)
+### [x] Step: Refactor Frontend Data Flow (No Behavior Change)
+<!-- chat-id: 24c3021a-75c6-4b92-b703-43041d154c42 -->
 
 Goal: fewer re-renders, clearer state boundaries, easier testing.
 

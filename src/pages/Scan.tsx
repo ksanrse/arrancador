@@ -22,7 +22,7 @@ import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { gamesApi, scanApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useGames } from "@/store/GamesContext";
+import { useGamesActions } from "@/store/GamesContext";
 import type { ExeEntry, NewGame } from "@/types";
 
 interface ScanResult extends ExeEntry {
@@ -34,7 +34,7 @@ interface ScanResult extends ExeEntry {
 }
 
 export default function Scan() {
-  const { addGames, refreshGames } = useGames();
+  const { addGames, refreshGames } = useGamesActions();
   const { notify } = useToast();
   const [activeTab, setActiveTab] = useState<"folders" | "processes">(
     "folders",

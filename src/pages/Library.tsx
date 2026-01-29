@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { Link } from "react-router-dom";
-import { useGames } from "@/store/GamesContext";
+import { useGamesState } from "@/store/GamesContext";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,7 +29,7 @@ function formatPlaytime(seconds: number) {
 }
 
 export default function Library() {
-  const { games, loading, favorites } = useGames();
+  const { games, loading, favorites } = useGamesState();
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [sortBy, setSortBy] = useState<SortBy>("name");

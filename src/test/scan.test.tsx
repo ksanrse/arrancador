@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Scan from "@/pages/Scan";
-import { useGames } from "@/store/GamesContext";
+import { useGamesActions } from "@/store/GamesContext";
 
 const { gamesApiMock, scanApiMock } = vi.hoisted(() => ({
   gamesApiMock: {
@@ -13,7 +13,7 @@ const { gamesApiMock, scanApiMock } = vi.hoisted(() => ({
   },
 }));
 
-vi.mock("@/store/GamesContext", () => ({ useGames: vi.fn() }));
+vi.mock("@/store/GamesContext", () => ({ useGamesActions: vi.fn() }));
 vi.mock("@/components/ToastProvider", () => ({
   useToast: () => ({ notify: vi.fn() }),
 }));
@@ -24,23 +24,18 @@ vi.mock("@tauri-apps/api/event", () => ({
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn() }));
 
-const useGamesMock = vi.mocked(useGames);
+const useGamesActionsMock = vi.mocked(useGamesActions);
 
 describe("Scan", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    useGamesMock.mockReturnValue({
-      games: [],
-      favorites: [],
-      loading: false,
-      error: null,
+    useGamesActionsMock.mockReturnValue({
       refreshGames: vi.fn(),
       addGame: vi.fn(),
       addGames: vi.fn(),
       updateGame: vi.fn(),
       deleteGame: vi.fn(),
       toggleFavorite: vi.fn(),
-      getGame: vi.fn(),
       searchGames: vi.fn(),
     });
   });
