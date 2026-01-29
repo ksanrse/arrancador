@@ -703,6 +703,7 @@ export default function Scan() {
                           onChange={(e) =>
                             updateName(activeTab, result.path, e.target.value)
                           }
+                          data-testid="scan-entry-name"
                           className="font-semibold bg-transparent border-none focus:outline-none p-0 text-sm sm:text-base w-fit max-w-full focus:ring-0 truncate hover:bg-accent/50 rounded px-1 -ml-1 transition-colors"
                           style={{
                             width: `${Math.max(result.customName.length, 1)}ch`,
