@@ -135,7 +135,8 @@ Test infrastructure approach:
 Verification:
 - `cd src-tauri; cargo test`
 
-### [ ] Step: Refactor Backend Into Testable Layers (No Behavior Change)
+### [x] Step: Refactor Backend Into Testable Layers (No Behavior Change)
+<!-- chat-id: f6b693cd-ce40-4c44-8212-37a9db4f54f3 -->
 
 Goal: reduce “god modules”, make performance improvements safe.
 
