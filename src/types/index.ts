@@ -34,6 +34,54 @@ export interface Game {
   user_note: string | null;
 }
 
+export const testGameFixture: Game = {
+  id: "game-1",
+  name: "Arcadia",
+  exe_path: "C:\\Games\\Arcadia\\arcadia.exe",
+  exe_name: "arcadia.exe",
+  rawg_id: 1101,
+  description: "Test game description",
+  released: "2022-01-12",
+  background_image: null,
+  metacritic: 86,
+  rating: 4.3,
+  genres: "Action, RPG",
+  platforms: "PC",
+  developers: "Arcadia Studio",
+  publishers: "Arcadia Publishing",
+  cover_image: null,
+  is_favorite: false,
+  play_count: 2,
+  total_playtime: 5400,
+  last_played: "2024-01-03T12:00:00.000Z",
+  date_added: "2024-01-01T09:00:00.000Z",
+  backup_enabled: true,
+  last_backup: "2024-01-02T09:00:00.000Z",
+  backup_count: 1,
+  save_path: "C:\\Games\\Arcadia\\saves",
+  user_rating: 5,
+  user_note: "Great game",
+};
+
+export const testFavoriteGameFixture: Game = {
+  ...testGameFixture,
+  id: "game-2",
+  name: "Bastion",
+  exe_path: "C:\\Games\\Bastion\\bastion.exe",
+  exe_name: "bastion.exe",
+  rawg_id: 1102,
+  is_favorite: true,
+  play_count: 0,
+  total_playtime: 0,
+  last_played: null,
+  metacritic: 74,
+};
+
+export const createTestGame = (overrides: Partial<Game> = {}): Game => ({
+  ...testGameFixture,
+  ...overrides,
+});
+
 export interface NewGame {
   name: string;
   exe_path: string;

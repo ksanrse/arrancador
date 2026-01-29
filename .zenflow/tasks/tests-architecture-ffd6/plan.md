@@ -87,7 +87,8 @@ Goal: make critical behaviors explicit and hard to regress.
 Verification:
 - Plan review only (no code changes expected beyond docs/tests scaffolding).
 
-### [ ] Step: Frontend Unit And Component Tests
+### [x] Step: Frontend Unit And Component Tests
+<!-- chat-id: 4ae596ae-acae-455e-b7b9-0b59bf100acd -->
 
 Goal: lock down UI behavior while enabling refactors.
 
