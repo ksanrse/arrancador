@@ -52,6 +52,7 @@ pub fn init_database() -> Result<()> {
             last_backup TEXT,
             backup_count INTEGER DEFAULT 0,
             save_path TEXT,
+            save_path_checked INTEGER DEFAULT 0,
 
             -- User rating
             user_rating INTEGER,
@@ -161,6 +162,12 @@ fn ensure_game_columns(conn: &Connection) -> Result<()> {
     }
     if !cols.contains("save_path") {
         conn.execute("ALTER TABLE games ADD COLUMN save_path TEXT", [])?;
+    }
+    if !cols.contains("save_path_checked") {
+        conn.execute(
+            "ALTER TABLE games ADD COLUMN save_path_checked INTEGER DEFAULT 0",
+            [],
+        )?;
     }
 
     Ok(())

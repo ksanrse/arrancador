@@ -1,10 +1,11 @@
 import { createBrowserRouter } from "react-router-dom";
+import GameDetail from "@/pages/GameDetail";
 import Layout from "@/pages/Layout";
 import Library from "@/pages/Library";
-import GameDetail from "@/pages/GameDetail";
 import Scan from "@/pages/Scan";
 import Settings from "@/pages/Settings";
 import Statistics from "@/pages/Statistics";
+import SystemInfo from "@/pages/SystemInfo";
 
 export const router = createBrowserRouter([
   {
@@ -15,6 +16,7 @@ export const router = createBrowserRouter([
       { path: "game/:id", element: <GameDetail /> },
       { path: "scan", element: <Scan /> },
       { path: "statistics", element: <Statistics /> },
+      { path: "system", element: <SystemInfo /> },
       { path: "settings", element: <Settings /> },
     ],
   },

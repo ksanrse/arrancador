@@ -5,19 +5,21 @@ mod metadata;
 mod scan;
 mod settings;
 mod stats;
+mod system;
 mod tracker;
 
 use backup::*;
 use database::init_database;
 use games::*;
 use metadata::*;
-use scan::{cancel_scan, scan_executables_stream, get_running_processes};
+use scan::{cancel_scan, get_running_processes, scan_executables_stream};
 use settings::*;
 use stats::*;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Manager, Runtime, WindowEvent};
+use system::*;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Manager, Runtime, WindowEvent};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -108,9 +110,6 @@ pub fn run() {
         eprintln!("Failed to initialize database: {}", e);
     }
 
-    // Start playtime tracker
-    tracker::start_tracker();
-
     tauri::Builder::default()
         .manage(AppState::new())
         .plugin(tauri_plugin_autostart::init(
@@ -121,6 +120,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             setup_tray(app.app_handle())?;
+            tracker::start_tracker(app.app_handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -157,6 +157,7 @@ pub fn run() {
             launch_game,
             get_running_instances,
             kill_game_processes,
+            resolve_shortcut_target,
             // Metadata commands
             search_rawg,
             get_rawg_game_details,
@@ -189,6 +190,9 @@ pub fn run() {
             remove_scan_directory,
             // Stats commands
             get_playtime_stats,
+            // System commands
+            get_system_info,
+            test_disk_speed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

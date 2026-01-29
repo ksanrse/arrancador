@@ -1,32 +1,33 @@
 use crate::database::with_db;
-use tauri::Emitter;
-use chrono::{DateTime, Local, Utc};
+use chrono::{DateTime, Local, NaiveDateTime, TimeZone, Utc};
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::sync::Mutex;
-use std::sync::Arc;
-use uuid::Uuid;
+use std::collections::HashMap;
 #[cfg(target_os = "windows")]
 use std::ffi::OsStr;
+use std::fs;
 #[cfg(target_os = "windows")]
 use std::os::windows::ffi::OsStrExt;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::Mutex;
+use tauri::Emitter;
+use uuid::Uuid;
 #[cfg(target_os = "windows")]
 use windows::core::PCWSTR;
 #[cfg(target_os = "windows")]
 use windows::Win32::Foundation::{CloseHandle, HANDLE};
 #[cfg(target_os = "windows")]
 use windows::Win32::Storage::FileSystem::{
-    CreateFileW, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL,
+    CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+};
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Ioctl::{
+    PropertyStandardQuery, StorageDeviceSeekPenaltyProperty, DEVICE_SEEK_PENALTY_DESCRIPTOR,
+    IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_PROPERTY_QUERY,
 };
 #[cfg(target_os = "windows")]
 use windows::Win32::System::IO::DeviceIoControl;
-#[cfg(target_os = "windows")]
-use windows::Win32::System::Ioctl::{
-    IOCTL_STORAGE_QUERY_PROPERTY, STORAGE_PROPERTY_QUERY, StorageDeviceSeekPenaltyProperty,
-    PropertyStandardQuery, DEVICE_SEEK_PENALTY_DESCRIPTOR,
-};
 
 // Import our new native engine
 #[path = "backup/engine.rs"]
@@ -35,7 +36,9 @@ pub mod engine;
 pub mod save_locator;
 #[path = "backup/sqoba_manifest.rs"]
 pub mod sqoba_manifest;
-use engine::{BackupEngine, BackupOptions, BackupProgress};
+use engine::{
+    load_backup_manifest, BackupArchiveManifest, BackupEngine, BackupOptions, BackupProgress,
+};
 
 lazy_static::lazy_static! {
     static ref BACKUP_ENGINE: Mutex<BackupEngine> = Mutex::new(BackupEngine::new());
@@ -78,7 +81,7 @@ pub struct RestoreCheck {
     pub backup_size: i64,
 }
 
-fn get_backup_directory() -> PathBuf {
+pub(crate) fn get_backup_directory() -> PathBuf {
     let custom_path: String = with_db(|conn| {
         let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = 'backup_directory'")?;
         let result: String = stmt.query_row([], |row| row.get(0)).unwrap_or_default();
@@ -104,6 +107,262 @@ fn sanitize_folder_name(name: &str) -> String {
     } else {
         cleaned
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct BackupImportResult {
+    #[allow(dead_code)]
+    pub backups_added: usize,
+    #[allow(dead_code)]
+    pub save_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct BackupImportEntry {
+    path: PathBuf,
+    size: u64,
+    created_at: DateTime<Utc>,
+    save_root: Option<String>,
+}
+
+pub fn import_existing_backups_for_game(
+    game_id: &str,
+    game_name: &str,
+) -> Result<BackupImportResult, String> {
+    let backup_root = get_backup_directory();
+    if !backup_root.exists() {
+        return Ok(BackupImportResult {
+            backups_added: 0,
+            save_path: None,
+        });
+    }
+
+    let candidate_dirs = find_backup_game_dirs(&backup_root, game_name);
+    if candidate_dirs.is_empty() {
+        return Ok(BackupImportResult {
+            backups_added: 0,
+            save_path: None,
+        });
+    }
+
+    let mut entries: Vec<BackupImportEntry> = Vec::new();
+    let mut seen_paths = HashMap::new();
+
+    for dir in candidate_dirs {
+        if let Ok(dir_entries) = fs::read_dir(&dir) {
+            for entry in dir_entries.flatten() {
+                let path = entry.path();
+                if !path.is_dir() {
+                    if path.extension().and_then(|s| s.to_str()).is_none() {
+                        continue;
+                    }
+                    let lower = path
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("")
+                        .to_lowercase();
+                    if lower != "zip" {
+                        continue;
+                    }
+                }
+
+                if seen_paths.contains_key(&path) {
+                    continue;
+                }
+
+                if let Ok(Some(manifest)) = load_backup_manifest(&path) {
+                    let size = manifest.files.iter().map(|f| f.size).sum();
+                    let created_at = backup_entry_timestamp(&path);
+                    let save_root = derive_save_root_from_manifest(&manifest);
+                    entries.push(BackupImportEntry {
+                        path: path.clone(),
+                        size,
+                        created_at,
+                        save_root,
+                    });
+                    seen_paths.insert(path, true);
+                }
+            }
+        }
+    }
+
+    if entries.is_empty() {
+        return Ok(BackupImportResult {
+            backups_added: 0,
+            save_path: None,
+        });
+    }
+
+    entries.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+    let save_path = entries.iter().find_map(|entry| entry.save_root.clone());
+    let last_backup = entries.first().map(|entry| entry.created_at.to_rfc3339());
+    let backup_count = entries.len() as i32;
+
+    with_db(|conn| {
+        for entry in &entries {
+            let backup_id = Uuid::new_v4().to_string();
+            conn.execute(
+                "INSERT INTO backups (id, game_id, backup_path, backup_size, created_at, is_auto, notes)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, NULL)",
+                params![
+                    backup_id,
+                    game_id,
+                    entry.path.to_string_lossy().to_string(),
+                    entry.size as i64,
+                    entry.created_at.to_rfc3339()
+                ],
+            )?;
+        }
+
+        conn.execute(
+            "UPDATE games SET backup_count = ?1, last_backup = ?2, backup_enabled = 1 WHERE id = ?3",
+            params![backup_count, last_backup, game_id],
+        )?;
+
+        if let Some(path) = &save_path {
+            conn.execute(
+                "UPDATE games SET save_path = ?1, save_path_checked = 1 WHERE id = ?2",
+                params![path, game_id],
+            )?;
+        }
+
+        Ok(())
+    })
+    .map_err(|e| e.to_string())?;
+
+    Ok(BackupImportResult {
+        backups_added: entries.len(),
+        save_path,
+    })
+}
+
+fn find_backup_game_dirs(backup_root: &Path, game_name: &str) -> Vec<PathBuf> {
+    let base = sanitize_folder_name(game_name).to_lowercase();
+    if base.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if let Ok(entries) = fs::read_dir(backup_root) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_lowercase();
+            if name == base || name.starts_with(&format!("{}-", base)) {
+                out.push(path);
+            }
+        }
+    }
+    out
+}
+
+fn backup_entry_timestamp(path: &Path) -> DateTime<Utc> {
+    let name = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+    if let Some(dt) = parse_backup_timestamp(name) {
+        return dt;
+    }
+    if let Ok(metadata) = fs::metadata(path) {
+        if let Ok(modified) = metadata.modified() {
+            return DateTime::<Utc>::from(modified);
+        }
+    }
+    Utc::now()
+}
+
+fn parse_backup_timestamp(name: &str) -> Option<DateTime<Utc>> {
+    let trimmed = name
+        .strip_suffix(".sqoba.zip")
+        .or_else(|| name.strip_suffix(".zip"))
+        .unwrap_or(name);
+    let naive = NaiveDateTime::parse_from_str(trimmed, "%H%M%S_%d%m%Y").ok()?;
+    Local
+        .from_local_datetime(&naive)
+        .single()
+        .map(|dt| dt.with_timezone(&Utc))
+}
+
+fn derive_save_root_from_manifest(manifest: &BackupArchiveManifest) -> Option<String> {
+    let mut totals: HashMap<String, u64> = HashMap::new();
+    let mut roots: HashMap<String, PathBuf> = HashMap::new();
+
+    for entry in &manifest.files {
+        let (root_label, rel) = match parse_backup_relative(&entry.backup_path) {
+            Some(value) => value,
+            None => continue,
+        };
+        let original_path = PathBuf::from(&entry.original_path);
+        let root = strip_suffix_path(&original_path, &rel)
+            .or_else(|| original_path.parent().map(|p| p.to_path_buf()));
+        let Some(root) = root else {
+            continue;
+        };
+
+        *totals.entry(root_label.clone()).or_insert(0) += entry.size;
+        roots.entry(root_label).or_insert(root);
+    }
+
+    if totals.is_empty() {
+        if let Some(first) = manifest.files.first() {
+            return PathBuf::from(&first.original_path)
+                .parent()
+                .map(|p| p.to_string_lossy().to_string());
+        }
+        return None;
+    }
+
+    let best_label = totals
+        .iter()
+        .max_by_key(|(_, size)| *size)
+        .map(|(label, _)| label.clone())?;
+    roots
+        .get(&best_label)
+        .map(|path| path.to_string_lossy().to_string())
+}
+
+fn parse_backup_relative(backup_path: &str) -> Option<(String, PathBuf)> {
+    let parts: Vec<&str> = backup_path.split('/').filter(|p| !p.is_empty()).collect();
+    if parts.len() < 3 || parts[0] != "files" {
+        return None;
+    }
+    let root_label = parts[1].to_string();
+    let mut rel = PathBuf::new();
+    for part in parts.iter().skip(2) {
+        rel.push(part);
+    }
+    Some((root_label, rel))
+}
+
+fn strip_suffix_path(path: &Path, suffix: &Path) -> Option<PathBuf> {
+    let path_components: Vec<_> = path.components().collect();
+    let suffix_components: Vec<_> = suffix.components().collect();
+    if suffix_components.is_empty() {
+        return Some(path.to_path_buf());
+    }
+    if path_components.len() < suffix_components.len() {
+        return None;
+    }
+    let start = path_components.len() - suffix_components.len();
+    for (a, b) in path_components[start..]
+        .iter()
+        .zip(suffix_components.iter())
+    {
+        let a_str = a.as_os_str().to_string_lossy();
+        let b_str = b.as_os_str().to_string_lossy();
+        let matches = if cfg!(target_os = "windows") {
+            a_str.to_lowercase() == b_str.to_lowercase()
+        } else {
+            a_str == b_str
+        };
+        if !matches {
+            return None;
+        }
+    }
+    let mut out = PathBuf::new();
+    for comp in path_components.iter().take(start) {
+        out.push(comp.as_os_str());
+    }
+    Some(out)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -706,8 +965,11 @@ pub async fn restore_backup(app: tauri::AppHandle, backup_id: String) -> Result<
                 );
             }) as Arc<dyn Fn(BackupProgress) + Send + Sync>
         };
-        let result =
-            engine.restore_backup_with_threads_and_progress(Path::new(&backup_path), threads, Some(progress));
+        let result = engine.restore_backup_with_threads_and_progress(
+            Path::new(&backup_path),
+            threads,
+            Some(progress),
+        );
         let _ = app.emit(
             "restore:progress",
             BackupProgressEvent {
@@ -923,7 +1185,83 @@ pub fn check_restore_needed(game_id: String, game_name: String) -> Result<Restor
     }
 }
 
-pub fn auto_backup_on_exit(game_id: &str) -> Result<(), String> {
+#[derive(Debug, Serialize, Clone)]
+struct SavePathMissingEvent {
+    game_id: String,
+    game_name: String,
+}
+
+#[derive(Debug)]
+struct GameExitState {
+    name: String,
+    backup_enabled: bool,
+    save_path: Option<String>,
+    save_path_checked: bool,
+}
+
+fn load_game_exit_state(game_id: &str) -> Result<GameExitState, String> {
+    with_db(|conn| {
+        let mut stmt = conn.prepare(
+            "SELECT name, backup_enabled, save_path, save_path_checked FROM games WHERE id = ?1",
+        )?;
+        let result = stmt.query_row(params![game_id], |row| {
+            let name: String = row.get(0)?;
+            let enabled: i32 = row.get(1)?;
+            let save_path: Option<String> = row.get(2)?;
+            let checked: Option<i32> = row.get(3).ok();
+            Ok(GameExitState {
+                name,
+                backup_enabled: enabled == 1,
+                save_path,
+                save_path_checked: checked.unwrap_or(0) == 1,
+            })
+        });
+        Ok(result.ok())
+    })
+    .unwrap_or(None)
+    .ok_or_else(|| "Game not found".to_string())
+}
+
+fn set_save_path_checked(game_id: &str, checked: bool) -> Result<(), String> {
+    with_db(|conn| {
+        conn.execute(
+            "UPDATE games SET save_path_checked = ?1 WHERE id = ?2",
+            params![if checked { 1 } else { 0 }, game_id],
+        )?;
+        Ok(())
+    })
+    .map_err(|e| e.to_string())
+}
+
+fn try_auto_discover_save_path(game_id: &str, game_name: &str) -> Result<bool, String> {
+    let result = find_game_saves(game_name.to_string(), Some(game_id.to_string()));
+    let _ = set_save_path_checked(game_id, true);
+    result.map(|info| info.is_some())
+}
+
+pub fn auto_backup_on_exit(game_id: &str, app: Option<tauri::AppHandle>) -> Result<(), String> {
+    let state = load_game_exit_state(game_id)?;
+    if state.save_path.is_none() && !state.save_path_checked {
+        match try_auto_discover_save_path(game_id, &state.name) {
+            Ok(found) => {
+                if !found {
+                    if let Some(app) = app {
+                        let _ = app.emit(
+                            "game:save-path-missing",
+                            SavePathMissingEvent {
+                                game_id: game_id.to_string(),
+                                game_name: state.name.clone(),
+                            },
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                eprintln!("Auto save discovery failed for {}: {}", game_id, e);
+            }
+        }
+    }
+
     let auto_backup: String = with_db(|conn| {
         let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = 'auto_backup'")?;
         let result: String = stmt
@@ -937,30 +1275,18 @@ pub fn auto_backup_on_exit(game_id: &str) -> Result<(), String> {
         return Ok(());
     }
 
-    let (game_name, backup_enabled) = with_db(|conn| {
-        let mut stmt = conn.prepare("SELECT name, backup_enabled FROM games WHERE id = ?1")?;
-        let result = stmt.query_row(params![game_id], |row| {
-            let name: String = row.get(0)?;
-            let enabled: i32 = row.get(1)?;
-            Ok((name, enabled == 1))
-        });
-        Ok(result.ok())
-    })
-    .unwrap_or(None)
-    .ok_or_else(|| "Game not found".to_string())?;
-
-    if !backup_enabled {
+    if !state.backup_enabled {
         return Ok(());
     }
 
-    if !check_backup_needed(game_id.to_string(), game_name.clone())? {
+    if !check_backup_needed(game_id.to_string(), state.name.clone())? {
         return Ok(());
     }
 
     create_backup_inner(
         None,
         game_id.to_string(),
-        game_name,
+        state.name,
         true,
         Some("Auto backup after exit".to_string()),
     )?;

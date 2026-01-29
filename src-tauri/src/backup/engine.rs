@@ -50,7 +50,10 @@ pub struct BackupProgress {
 #[derive(Debug, Clone, Copy)]
 pub enum BackupMode {
     Directory,
-    Zip { level: u8, compression: ZipCompression },
+    Zip {
+        level: u8,
+        compression: ZipCompression,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -267,12 +270,9 @@ impl BackupEngine {
             .collect();
 
         let total_bytes = match options.mode {
-            BackupMode::Directory => self.backup_to_directory(
-                destination,
-                &file_list,
-                threads,
-                progress,
-            )?,
+            BackupMode::Directory => {
+                self.backup_to_directory(destination, &file_list, threads, progress)?
+            }
             BackupMode::Zip { level, compression } => {
                 self.backup_to_zip(destination, &file_list, level, compression, progress)?
             }
@@ -280,7 +280,10 @@ impl BackupEngine {
 
         if let Some(matched_name) = matched_name {
             if matched_name != name {
-                println!("Backup matched '{}' to manifest entry '{}'", name, matched_name);
+                println!(
+                    "Backup matched '{}' to manifest entry '{}'",
+                    name, matched_name
+                );
             }
         }
 
@@ -413,7 +416,8 @@ impl BackupEngine {
             files
                 .par_iter()
                 .map(|file| {
-                    let size = self.copy_file_to_backup(destination, &file.path, &file.backup_path)?;
+                    let size =
+                        self.copy_file_to_backup(destination, &file.path, &file.backup_path)?;
                     let done = counter.fetch_add(1, Ordering::SeqCst) + 1;
                     if let Some(cb) = &progress_ref {
                         if done == total || done % 50 == 0 {
@@ -479,7 +483,10 @@ impl BackupEngine {
             let mut source = File::open(&file.path).map_err(|e| e.to_string())?;
             let metadata = source.metadata().map_err(|e| e.to_string())?;
             let size = metadata.len();
-            let mtime = metadata.modified().ok().and_then(system_time_to_epoch_seconds);
+            let mtime = metadata
+                .modified()
+                .ok()
+                .and_then(system_time_to_epoch_seconds);
 
             archive
                 .start_file(&file.backup_path, file_options)
@@ -570,7 +577,9 @@ impl BackupEngine {
         archive
             .start_file(SQOBA_README_NAME, options)
             .map_err(|e| e.to_string())?;
-        archive.write_all(readme.as_bytes()).map_err(|e| e.to_string())?;
+        archive
+            .write_all(readme.as_bytes())
+            .map_err(|e| e.to_string())?;
         Ok(())
     }
 
@@ -655,6 +664,16 @@ fn read_manifest_from_zip<R: Read + Seek>(
         }
     }
     Ok(None)
+}
+
+pub fn load_backup_manifest(backup_path: &Path) -> Result<Option<BackupArchiveManifest>, String> {
+    if backup_path.is_dir() {
+        return read_manifest_from_dir(backup_path);
+    }
+
+    let file = File::open(backup_path).map_err(|e| e.to_string())?;
+    let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
+    read_manifest_from_zip(&mut archive)
 }
 
 fn backup_readme_text() -> String {
@@ -808,8 +827,8 @@ mod tests {
         assert!(backup_path.join(SQOBA_MANIFEST_NAME).exists());
         assert!(backup_path.join(SQOBA_README_NAME).exists());
 
-        let manifest_text = fs::read_to_string(backup_path.join(SQOBA_MANIFEST_NAME))
-            .expect("read manifest");
+        let manifest_text =
+            fs::read_to_string(backup_path.join(SQOBA_MANIFEST_NAME)).expect("read manifest");
         let manifest: BackupArchiveManifest =
             serde_json::from_str(&manifest_text).expect("parse manifest");
         assert!(!manifest.files.is_empty());

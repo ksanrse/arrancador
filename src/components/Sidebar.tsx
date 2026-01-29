@@ -4,6 +4,7 @@ import {
   ChevronRight,
   FolderSearch,
   Gamepad2,
+  Monitor,
   Settings,
   Star,
 } from "lucide-react";
@@ -19,6 +20,7 @@ const navItems = [
   { title: "Библиотека", to: "/", icon: Gamepad2 },
   { title: "Сканирование", to: "/scan", icon: FolderSearch },
   { title: "Статистика", to: "/statistics", icon: BarChart2 },
+  { title: "Система", to: "/system", icon: Monitor },
   { title: "Настройки", to: "/settings", icon: Settings },
 ];
 
@@ -32,7 +34,9 @@ export function Sidebar() {
   const sidebarWidthClass = collapsed
     ? "lg:w-[72px] lg:min-w-[72px]"
     : "lg:w-[260px] lg:min-w-[260px]";
-  const navItemLayoutClass = collapsed ? "lg:justify-center lg:px-2" : "lg:px-3";
+  const navItemLayoutClass = collapsed
+    ? "lg:justify-center lg:px-2"
+    : "lg:px-3";
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -105,7 +109,12 @@ export function Sidebar() {
 
         {/* Favorites Section */}
         {favorites.length > 0 && (
-          <div className={cn("pt-4 mt-4 border-t border-border/60", collapsed && "lg:hidden")}>
+          <div
+            className={cn(
+              "pt-4 mt-4 border-t border-border/60",
+              collapsed && "lg:hidden",
+            )}
+          >
             <div className="px-3 py-2 text-[11px] font-semibold text-muted-foreground uppercase tracking-widest">
               Избранное
             </div>

@@ -151,3 +151,71 @@ export interface PlaytimeStats {
   daily_totals: DailyPlaytime[];
   per_game_totals: GamePlaytime[];
 }
+
+export interface SystemCpuInfo {
+  brand: string;
+  vendor_id: string;
+  frequency_mhz: number;
+  physical_cores: number | null;
+  logical_cores: number;
+}
+
+export interface SystemMemoryInfo {
+  total_bytes: number;
+  used_bytes: number;
+  free_bytes: number;
+  available_bytes: number;
+  total_swap_bytes: number;
+  used_swap_bytes: number;
+}
+
+export interface SystemDiskInfo {
+  name: string;
+  mount_point: string;
+  file_system: string;
+  total_bytes: number;
+  available_bytes: number;
+  kind: string;
+  is_removable: boolean;
+  model: string | null;
+  media_type: string | null;
+}
+
+export interface SystemGpuInfo {
+  name: string;
+  device_name: string;
+  is_primary: boolean;
+}
+
+export interface SystemMonitorInfo {
+  name: string;
+  device_name: string;
+  width: number;
+  height: number;
+  refresh_rate: number;
+  is_primary: boolean;
+}
+
+export interface SystemInfo {
+  hostname: string | null;
+  os_name: string | null;
+  os_version: string | null;
+  kernel_version: string | null;
+  uptime_seconds: number;
+  boot_time: number;
+  arch: string;
+  cpu: SystemCpuInfo;
+  memory: SystemMemoryInfo;
+  disks: SystemDiskInfo[];
+  gpus: SystemGpuInfo[];
+  monitors: SystemMonitorInfo[];
+}
+
+export interface DiskSpeedResult {
+  mount_point: string;
+  size_bytes: number;
+  write_mbps: number;
+  read_mbps: number;
+  elapsed_write_ms: number;
+  elapsed_read_ms: number;
+}

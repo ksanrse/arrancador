@@ -1,15 +1,34 @@
+use crate::backup::import_existing_backups_for_game;
 use crate::database::with_db;
 use chrono::Utc;
 use rusqlite::{params, Result};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-use sysinfo::{ProcessesToUpdate, System};
+#[cfg(target_os = "windows")]
+use std::ffi::OsStr;
+#[cfg(target_os = "windows")]
+use std::os::windows::ffi::OsStrExt;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
+use std::path::PathBuf;
+use sysinfo::{ProcessesToUpdate, System};
+use uuid::Uuid;
+#[cfg(target_os = "windows")]
+use windows::core::{Interface, PCWSTR};
+#[cfg(target_os = "windows")]
+use windows::Win32::Storage::FileSystem::WIN32_FIND_DATAW;
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Com::IPersistFile;
+#[cfg(target_os = "windows")]
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER,
+    COINIT_APARTMENTTHREADED, STGM_READ,
+};
 #[cfg(target_os = "windows")]
 use windows::Win32::System::Threading::{
     CREATE_BREAKAWAY_FROM_JOB, CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS,
 };
+#[cfg(target_os = "windows")]
+use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Game {
@@ -137,18 +156,27 @@ pub fn add_game(game: NewGame) -> Result<Game, String> {
             "INSERT INTO games (id, name, exe_path, exe_name, date_added) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![id, game.name, game.exe_path, game.exe_name, date_added],
         )?;
+        Ok(())
+    })
+    .map_err(|e| e.to_string())?;
 
+    if let Err(e) = import_existing_backups_for_game(&id, &game.name) {
+        eprintln!("Failed to import backups for {}: {}", id, e);
+    }
+
+    with_db(|conn| {
         let mut stmt = conn.prepare(
             "SELECT id, name, exe_path, exe_name, rawg_id, description, released,
              background_image, metacritic, rating, genres, platforms, developers, publishers,
              cover_image, is_favorite, play_count, total_playtime, last_played, date_added,
              backup_enabled, last_backup, backup_count, save_path, user_rating, user_note
-             FROM games WHERE id = ?1"
+             FROM games WHERE id = ?1",
         )?;
 
         let game = stmt.query_row(params![id], Game::from_row)?;
         Ok(game)
-    }).map_err(|e| e.to_string())
+    })
+    .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -244,7 +272,10 @@ pub fn update_game(update: UpdateGame) -> Result<Game, String> {
             } else {
                 Some(save_path.clone())
             };
+            let checked = normalized.is_some();
             params_vec.push(Box::new(normalized));
+            updates.push("save_path_checked = ?");
+            params_vec.push(Box::new(if checked { 1 } else { 0 }));
         }
         if let Some(rawg_id) = update.rawg_id {
             updates.push("rawg_id = ?");
@@ -408,6 +439,29 @@ pub fn game_exists_by_path(exe_path: String) -> Result<bool, String> {
 }
 
 #[tauri::command]
+pub fn resolve_shortcut_target(path: String) -> Result<String, String> {
+    let input = PathBuf::from(&path);
+    let is_shortcut = input
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.eq_ignore_ascii_case("lnk"))
+        .unwrap_or(false);
+    if !is_shortcut {
+        return Ok(path);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let resolved = resolve_shortcut_windows(&input)?;
+        return Ok(resolved.to_string_lossy().to_string());
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Ok(path)
+    }
+}
+
+#[tauri::command]
 pub fn is_game_installed(id: String) -> Result<bool, String> {
     let exe_path: String = with_db(|conn| {
         let mut stmt = conn.prepare("SELECT exe_path FROM games WHERE id = ?1")?;
@@ -484,8 +538,8 @@ pub async fn launch_game(id: String) -> Result<(), String> {
     // 2. Spawn process (fire and forget)
     // The background tracker will handle playtime tracking
     tauri::async_runtime::spawn_blocking(move || spawn_game_process(&exe_path))
-    .await
-    .map_err(|e| e.to_string())??;
+        .await
+        .map_err(|e| e.to_string())??;
 
     // 3. Record Start (Increment play count) only after successful spawn
     record_game_launch(id.clone())?;
@@ -499,6 +553,59 @@ fn paths_match(p1: &std::path::Path, p2: &std::path::Path) -> bool {
     } else {
         p1 == p2
     }
+}
+
+#[cfg(target_os = "windows")]
+struct ComGuard;
+
+#[cfg(target_os = "windows")]
+impl Drop for ComGuard {
+    fn drop(&mut self) {
+        unsafe {
+            CoUninitialize();
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn resolve_shortcut_windows(path: &PathBuf) -> Result<PathBuf, String> {
+    unsafe {
+        CoInitializeEx(None, COINIT_APARTMENTTHREADED)
+            .ok()
+            .map_err(|e| e.to_string())?;
+    }
+    let _guard = ComGuard;
+
+    let link: IShellLinkW = unsafe {
+        CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER).map_err(|e| e.to_string())?
+    };
+    let persist: IPersistFile = link
+        .cast::<IPersistFile>()
+        .map_err(|e: windows::core::Error| e.to_string())?;
+
+    let wide: Vec<u16> = OsStr::new(path)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        persist
+            .Load(PCWSTR(wide.as_ptr()), STGM_READ)
+            .map_err(|e: windows::core::Error| e.to_string())?;
+    }
+
+    let mut buffer = [0u16; 260];
+    let mut data = WIN32_FIND_DATAW::default();
+    unsafe {
+        link.GetPath(&mut buffer, &mut data, 0)
+            .map_err(|e: windows::core::Error| e.to_string())?;
+    }
+
+    let len = buffer.iter().position(|c| *c == 0).unwrap_or(buffer.len());
+    let target = String::from_utf16_lossy(&buffer[..len]);
+    if target.trim().is_empty() {
+        return Err("Shortcut target is empty".to_string());
+    }
+    Ok(PathBuf::from(target))
 }
 
 fn spawn_game_process(exe_path: &str) -> Result<(), String> {

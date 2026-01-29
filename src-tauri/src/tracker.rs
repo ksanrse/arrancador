@@ -2,11 +2,12 @@ use crate::backup::auto_backup_on_exit;
 use crate::database::with_db;
 use chrono::Utc;
 use rusqlite::params;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::thread;
 use std::time::Duration;
 use sysinfo::{ProcessesToUpdate, System};
-use std::collections::HashSet;
+use tauri::AppHandle;
 
 const UPDATE_INTERVAL_SECS: u64 = 10;
 
@@ -16,13 +17,14 @@ struct GameInfo {
     exe_path: PathBuf,
 }
 
-pub fn start_tracker() {
+pub fn start_tracker(app: AppHandle) {
     thread::spawn(move || {
         let mut sys = System::new_all();
         let mut games_cache: Vec<GameInfo> = Vec::new();
         let mut last_cache_update = std::time::Instant::now();
         let cache_ttl = Duration::from_secs(60); // Update game list every minute
         let mut previously_active: HashSet<String> = HashSet::new();
+        let app_handle = app;
 
         // Initial load
         update_games_cache(&mut games_cache);
@@ -70,8 +72,9 @@ pub fn start_tracker() {
 
             for game_id in ended {
                 let id_clone = game_id.clone();
+                let app_clone = app_handle.clone();
                 thread::spawn(move || {
-                    if let Err(e) = auto_backup_on_exit(&id_clone) {
+                    if let Err(e) = auto_backup_on_exit(&id_clone, Some(app_clone)) {
                         eprintln!("Auto-backup failed for {}: {}", id_clone, e);
                     }
                 });

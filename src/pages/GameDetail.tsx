@@ -17,6 +17,7 @@ import {
   Play,
   Save,
   Search,
+  Settings,
   Shield,
   Star,
   Timer,
@@ -26,6 +27,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { useToast } from "@/components/ToastProvider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -100,6 +102,9 @@ export default function GameDetail() {
   const [savingUserRating, setSavingUserRating] = useState(false);
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [ratingDraft, setRatingDraft] = useState(4);
+  const [showGameSettings, setShowGameSettings] = useState(false);
+
+  const { notify } = useToast();
 
   const latestBackup = backups[0];
   const olderBackups = backups.slice(1);
@@ -486,12 +491,14 @@ export default function GameDetail() {
     }
   };
 
-  const toggleBackupEnabled = async () => {
+  const toggleBackupEnabled = async (next?: boolean) => {
     if (!game) return;
+    const desired = typeof next === "boolean" ? next : !game.backup_enabled;
+    if (desired === game.backup_enabled) return;
     try {
       await gamesApi.update({
         id: game.id,
-        backup_enabled: !game.backup_enabled,
+        backup_enabled: desired,
       });
       await refreshGames();
     } catch (e) {
@@ -503,7 +510,8 @@ export default function GameDetail() {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043f\u0430\u043f\u043a\u0443 \u0441 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f\u043c\u0438",
+      title:
+        "\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043f\u0430\u043f\u043a\u0443 \u0441 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f\u043c\u0438",
     });
 
     if (selected) {
@@ -531,15 +539,23 @@ export default function GameDetail() {
       if (info?.save_path) {
         setSavePathDraft(info.save_path);
       } else {
-        alert(
-          "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043d\u0430\u0439\u0442\u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f. \u0423\u043a\u0430\u0436\u0438\u0442\u0435 \u043f\u0443\u0442\u044c \u0432\u0440\u0443\u0447\u043d\u0443\u044e.",
-        );
+        notify({
+          tone: "warning",
+          title:
+            "\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b",
+          description:
+            "\u0423\u043a\u0430\u0436\u0438\u0442\u0435 \u043f\u0443\u0442\u044c \u0432\u0440\u0443\u0447\u043d\u0443\u044e, \u0447\u0442\u043e\u0431\u044b \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f \u043f\u043e\u043f\u0430\u0434\u0430\u043b\u0438 \u0432 \u0431\u044d\u043a\u0430\u043f\u044b.",
+        });
       }
     } catch (e) {
       console.error("Failed to locate saves:", e);
-      alert(
-        "\u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u0440\u0438 \u043f\u043e\u0438\u0441\u043a\u0435 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0439.",
-      );
+      notify({
+        tone: "error",
+        title:
+          "\u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u043e\u0438\u0441\u043a\u0430 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0439",
+        description:
+          "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043f\u0443\u0442\u044c \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0439.",
+      });
     } finally {
       setLocatingSavePath(false);
     }
@@ -702,6 +718,15 @@ export default function GameDetail() {
             title="Найти метаданные (RAWG)"
           >
             <Search className="w-4 h-4" />
+          </Button>
+          <Button
+            variant="secondary"
+            size="icon"
+            onClick={() => setShowGameSettings(true)}
+            className="bg-background/60 backdrop-blur-md border border-white/10"
+            title="\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u0438\u0433\u0440\u044b"
+          >
+            <Settings className="w-4 h-4" />
           </Button>
           <Button
             variant="secondary"
@@ -931,31 +956,22 @@ export default function GameDetail() {
                   >
                     <Download className="w-3 h-3" />
                   </Button>
+
                   <Button
-                    variant={game.backup_enabled ? "default" : "outline"}
                     size="icon"
                     className="h-8 w-8"
-                    onClick={toggleBackupEnabled}
-                    title={
-                      game.backup_enabled
-                        ? "Авто-бэкап включен"
-                        : "Авто-бэкап выключен"
-                    }
+                    variant="outline"
+                    onClick={() => setShowGameSettings(true)}
+                    title="\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u0438\u0433\u0440\u044b"
                   >
-                    <Shield
-                      className={cn(
-                        "w-3 h-3",
-                        game.backup_enabled && "fill-current",
-                      )}
-                    />
+                    <Settings className="w-3 h-3" />
                   </Button>{" "}
                 </div>
               </div>
-
-              <div className="rounded-xl border border-border/60 bg-secondary/40 p-3 mb-3 space-y-3">
+              <div className="rounded-xl border border-border/60 bg-secondary/40 p-3 mb-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {"\u041f\u0443\u0442\u044c \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0439"}
+                    {"\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f"}
                   </div>
                   <span
                     className={cn(
@@ -966,69 +982,32 @@ export default function GameDetail() {
                     )}
                   >
                     {game.save_path
-                      ? "\u041d\u0430\u0441\u0442\u0440\u043e\u0435\u043d"
+                      ? "\u041d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u043e"
                       : "\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e"}
                   </span>
                 </div>
-                <div className="flex gap-2">
-                  <Input
-                    value={savePathDraft}
-                    onChange={(event) => setSavePathDraft(event.target.value)}
-                    placeholder={
-                      "\u041f\u0443\u0442\u044c \u043a \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f\u043c"
-                    }
-                    className="flex-1 text-xs"
-                  />
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={handleSelectSavePath}
-                    title="\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043f\u0430\u043f\u043a\u0443"
-                  >
-                    <FolderOpen className="w-4 h-4" />
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={handleOpenSavePath}
-                    disabled={!savePathValue}
-                    title="\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043f\u0430\u043f\u043a\u0443"
-                  >
-                    <ExternalLink className="w-4 h-4" />
-                  </Button>
+                <div className="text-xs text-muted-foreground truncate">
+                  {game.save_path
+                    ? game.save_path
+                    : "\u041f\u0443\u0442\u044c \u043a \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f\u043c \u043d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d"}
                 </div>
-                <div className="flex items-center justify-between gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleLocateSavePath}
-                    disabled={locatingSavePath}
-                    className="text-xs"
-                  >
-                    {locatingSavePath ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <Search className="w-3 h-3" />
-                    )}
-                    {"\u041d\u0430\u0439\u0442\u0438"}
-                  </Button>
-                  <Button
-                    size="sm"
-                    onClick={handleSaveSavePath}
-                    disabled={savingSavePath || !savePathDirty}
-                    className="text-xs"
-                  >
-                    {savingSavePath ? (
-                      <Loader2 className="w-3 h-3 animate-spin" />
-                    ) : (
-                      <Save className="w-3 h-3" />
-                    )}
-                    {"\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c"}
-                  </Button>
+                <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                  <span>{"\u0410\u0432\u0442\u043e\u0431\u044d\u043a\u0430\u043f"}</span>
+                  <span className={game.backup_enabled ? "text-emerald-400" : "text-muted-foreground"}>
+                    {game.backup_enabled
+                      ? "\u0412\u043a\u043b\u044e\u0447\u0435\u043d"
+                      : "\u0412\u044b\u043a\u043b\u044e\u0447\u0435\u043d"}
+                  </span>
                 </div>
-                <p className="text-xs text-muted-foreground">
-                  {"\u0415\u0441\u043b\u0438 \u043f\u0443\u0442\u044c \u043f\u0443\u0441\u0442\u043e\u0439, SQOBA \u043f\u043e\u043f\u044b\u0442\u0430\u0435\u0442\u0441\u044f \u043d\u0430\u0439\u0442\u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f \u043f\u0440\u0438 \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0435\u043c \u0431\u044d\u043a\u0430\u043f\u0435."}
-                </p>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => setShowGameSettings(true)}
+                >
+                  <Settings className="w-3 h-3" />
+                  {"\u041d\u0430\u0441\u0442\u0440\u043e\u0438\u0442\u044c"}
+                </Button>
               </div>
 
               {loadingBackups ? (
@@ -1187,6 +1166,138 @@ export default function GameDetail() {
           </div>
         </div>
       </div>
+
+
+      {showGameSettings && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-card/90 backdrop-blur-xl rounded-2xl border border-border/60 w-full max-w-xl shadow-[0_30px_80px_rgba(8,12,24,0.55)] overflow-hidden">
+            <div className="flex items-center justify-between p-5 border-b border-border/60">
+              <div>
+                <div className="text-xs uppercase tracking-wider text-muted-foreground">
+                  {"\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u0438\u0433\u0440\u044b"}
+                </div>
+                <div className="text-lg font-semibold">{game.name}</div>
+              </div>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => setShowGameSettings(false)}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+            </div>
+
+            <ScrollArea className="max-h-[70vh]">
+              <div className="p-5 space-y-6">
+                <div className="rounded-2xl border border-border/60 bg-secondary/30 p-4 space-y-3">
+                  <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {"\u0411\u044d\u043a\u0430\u043f\u044b"}
+                  </div>
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium">
+                        {"\u0410\u0432\u0442\u043e\u0431\u044d\u043a\u0430\u043f"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {"\u0410\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u043e \u0441\u043e\u0437\u0434\u0430\u0432\u0430\u0442\u044c \u043a\u043e\u043f\u0438\u044e \u043f\u043e\u0441\u043b\u0435 \u0432\u044b\u0445\u043e\u0434\u0430 \u0438\u0437 \u0438\u0433\u0440\u044b"}
+                      </div>
+                    </div>
+                    <Switch
+                      checked={game.backup_enabled}
+                      onCheckedChange={(checked) => toggleBackupEnabled(checked)}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-border/60 bg-secondary/30 p-4 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                      {"\u041f\u0443\u0442\u044c \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0439"}
+                    </div>
+                    <span
+                      className={cn(
+                        "text-[10px] uppercase tracking-wider",
+                        game.save_path
+                          ? "text-emerald-400"
+                          : "text-muted-foreground",
+                      )}
+                    >
+                      {game.save_path
+                        ? "\u041d\u0430\u0441\u0442\u0440\u043e\u0435\u043d"
+                        : "\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e"}
+                    </span>
+                  </div>
+
+                  <Input
+                    value={savePathDraft}
+                    onChange={(event) => setSavePathDraft(event.target.value)}
+                    placeholder={
+                      "\u041f\u0443\u0442\u044c \u043a \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f\u043c"
+                    }
+                  />
+
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={handleSelectSavePath}
+                      title="\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043f\u0430\u043f\u043a\u0443"
+                    >
+                      <FolderOpen className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
+                      onClick={handleOpenSavePath}
+                      disabled={!savePathValue}
+                      title="\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043f\u0430\u043f\u043a\u0443"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleLocateSavePath}
+                      disabled={locatingSavePath}
+                      className="text-xs"
+                    >
+                      {locatingSavePath ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Search className="w-3 h-3" />
+                      )}
+                      {"\u041d\u0430\u0439\u0442\u0438"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleSaveSavePath}
+                      disabled={savingSavePath || !savePathDirty}
+                      className="text-xs"
+                    >
+                      {savingSavePath ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <Save className="w-3 h-3" />
+                      )}
+                      {"\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c"}
+                    </Button>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    {"\u0415\u0441\u043b\u0438 \u043f\u0443\u0442\u044c \u043f\u0443\u0441\u0442\u043e\u0439, SQOBA \u043f\u043e\u043f\u044b\u0442\u0430\u0435\u0442\u0441\u044f \u043d\u0430\u0439\u0442\u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f \u043f\u0440\u0438 \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0435\u043c \u0431\u044d\u043a\u0430\u043f\u0435."}
+                  </p>
+                </div>
+              </div>
+            </ScrollArea>
+
+            <div className="p-5 border-t border-border/60 flex justify-end">
+              <Button variant="ghost" onClick={() => setShowGameSettings(false)}>
+                {"\u0417\u0430\u043a\u0440\u044b\u0442\u044c"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showRatingModal && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
