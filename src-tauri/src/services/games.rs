@@ -114,16 +114,50 @@ pub fn add_game<D: Db>(db: &D, game: NewGame) -> Result<Game, String> {
 }
 
 pub fn add_games_batch<D: Db>(db: &D, games: Vec<NewGame>) -> Result<Vec<Game>, String> {
-    let mut added_games = Vec::new();
+    if games.is_empty() {
+        return Ok(Vec::new());
+    }
 
-    for game in games {
-        match add_game(db, game) {
-            Ok(g) => added_games.push(g),
-            Err(e) => {
-                if !e.contains("UNIQUE constraint failed") {
-                    eprintln!("Error adding game: {}", e);
+    let inserted = match db.with_conn(|conn| {
+        conn.execute_batch("BEGIN IMMEDIATE")?;
+        let mut inserted = Vec::new();
+        {
+            let mut stmt = conn.prepare(
+                "INSERT INTO games (id, name, exe_path, exe_name, date_added) VALUES (?1, ?2, ?3, ?4, ?5)",
+            )?;
+            for game in games {
+                let id = Uuid::new_v4().to_string();
+                let date_added = Utc::now().to_rfc3339();
+                let game_name = game.name.clone();
+                match stmt.execute(params![id, game.name, game.exe_path, game.exe_name, date_added]) {
+                    Ok(_) => inserted.push((id, game_name)),
+                    Err(e) => {
+                        if !e.to_string().contains("UNIQUE constraint failed") {
+                            eprintln!("Error adding game: {}", e);
+                        }
+                    }
                 }
             }
+        }
+        conn.execute_batch("COMMIT")?;
+        Ok(inserted)
+    }) {
+        Ok(inserted) => inserted,
+        Err(e) => {
+            eprintln!("Error adding game batch: {}", e);
+            return Ok(Vec::new());
+        }
+    };
+
+    let mut added_games = Vec::new();
+    for (id, game_name) in inserted {
+        if let Err(e) = import_existing_backups_for_game(&id, &game_name) {
+            eprintln!("Failed to import backups for {}: {}", id, e);
+        }
+
+        match db.with_conn(|conn| fetch_game_by_id(conn, &id)) {
+            Ok(game) => added_games.push(game),
+            Err(e) => eprintln!("Error fetching new game {}: {}", id, e),
         }
     }
 
@@ -491,5 +525,55 @@ fn spawn_game_process(exe_path: &str) -> Result<(), String> {
             .spawn()
             .map(|_| ())
             .map_err(|e| format!("Failed to launch game: {}", e))
+    }
+}
+
+#[cfg(test)]
+mod perf_bench {
+    use super::*;
+    use crate::database::init_schema;
+    use crate::db::ConnectionDb;
+    use rusqlite::{params, Connection};
+    use std::time::Instant;
+
+    #[test]
+    #[ignore]
+    fn perf_bench_library_load() {
+        let mut conn = Connection::open_in_memory().expect("open in-memory db");
+        init_schema(&conn).expect("init schema");
+
+        let date_added = Utc::now().to_rfc3339();
+        {
+            let tx = conn.transaction().expect("transaction");
+            {
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT INTO games (id, name, exe_path, exe_name, date_added) VALUES (?1, ?2, ?3, ?4, ?5)",
+                    )
+                    .expect("prepare insert");
+                for i in 0..5000 {
+                    let id = format!("bench-{i}");
+                    let name = format!("Game {i:04}");
+                    let exe_name = format!("game-{i}.exe");
+                    let exe_path = format!("C:/Games/{id}/{exe_name}");
+                    stmt.execute(params![id, name, exe_path, exe_name, date_added])
+                        .expect("insert game");
+                }
+            }
+            tx.commit().expect("commit");
+        }
+
+        let db = ConnectionDb::new(conn);
+        let start = Instant::now();
+        let games = get_all_games(&db).expect("get all games");
+        let serialized = serde_json::to_vec(&games).expect("serialize games");
+        let elapsed = start.elapsed();
+
+        println!(
+            "perf: library_load rows={} bytes={} duration_ms={}",
+            games.len(),
+            serialized.len(),
+            elapsed.as_millis()
+        );
     }
 }

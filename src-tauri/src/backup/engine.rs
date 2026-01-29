@@ -1,6 +1,7 @@
 use crate::backup::save_locator::{locate_game_saves, SaveDiscovery};
 use crate::backup::sqoba_manifest::{SqobaGame, SqobaManifest};
 use rayon::prelude::*;
+use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -21,6 +22,11 @@ const LEGACY_MANIFEST_NAME: &str = "__arrancador_manifest.json";
 const BACKUP_MANIFEST_NAMES: [&str; 2] = [SQOBA_MANIFEST_NAME, LEGACY_MANIFEST_NAME];
 const MANIFEST_VERSION: u32 = 2;
 const LUDUSAVI_MAPPING_NAME: &str = "mapping.yaml";
+
+lazy_static! {
+    static ref DRIVE_REGEX: Regex =
+        Regex::new(r"^([A-Za-z]):[\\/](.*)$").expect("drive regex");
+}
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct BackupArchiveManifest {
@@ -342,7 +348,7 @@ impl BackupEngine {
                             if source.exists() {
                                 fs::copy(source, target).map_err(|e| e.to_string())?;
                             }
-                            let done = counter.fetch_add(1, Ordering::SeqCst) + 1;
+                            let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
                             if let Some(cb) = &progress_ref {
                                 if done == total || done.is_multiple_of(50) {
                                     cb(BackupProgress {
@@ -418,7 +424,7 @@ impl BackupEngine {
                 .map(|file| {
                     let size =
                         self.copy_file_to_backup(destination, &file.path, &file.backup_path)?;
-                    let done = counter.fetch_add(1, Ordering::SeqCst) + 1;
+                    let done = counter.fetch_add(1, Ordering::Relaxed) + 1;
                     if let Some(cb) = &progress_ref {
                         if done == total || done.is_multiple_of(50) {
                             cb(BackupProgress {
@@ -439,7 +445,7 @@ impl BackupEngine {
                 .collect()
         });
 
-        let mut entries: Vec<BackupFileEntry> = Vec::new();
+        let mut entries: Vec<BackupFileEntry> = Vec::with_capacity(results.len());
         let mut total_bytes = 0;
         for r in results {
             let entry = r?;
@@ -752,8 +758,7 @@ fn split_drive_for_restore(
     original: &str,
     inverse_drives: &HashMap<String, String>,
 ) -> (String, String) {
-    let re = Regex::new(r"^([A-Za-z]):[\\/](.*)$").unwrap();
-    if let Some(caps) = re.captures(original) {
+    if let Some(caps) = DRIVE_REGEX.captures(original) {
         let letter = caps.get(1).unwrap().as_str().to_uppercase();
         let rest = caps.get(2).unwrap().as_str().replace('\\', "/");
         let prefix = format!("{}:", letter);
@@ -766,12 +771,10 @@ fn split_drive_for_restore(
 }
 
 fn build_backup_rel_path(root: &str, relative: &Path) -> String {
-    let mut rel = relative.to_string_lossy().replace('\\', "/");
-    while rel.starts_with('/') {
-        rel = rel[1..].to_string();
-    }
+    let rel = relative.to_string_lossy().replace('\\', "/");
+    let rel = rel.trim_start_matches('/');
     if rel.is_empty() {
-        rel = "file".to_string();
+        return format!("files/{}/file", root);
     }
     format!("files/{}/{}", root, rel)
 }
@@ -906,5 +909,77 @@ mod tests {
 
         assert_eq!(restored_a, b"alpha");
         assert_eq!(restored_b, b"beta");
+    }
+}
+
+#[cfg(test)]
+mod perf_bench {
+    use super::*;
+    use std::fs;
+    use std::time::Instant;
+    use tempfile::tempdir;
+
+    #[test]
+    #[ignore]
+    fn perf_bench_backup_roundtrip() {
+        let dir = tempdir().expect("tempdir");
+        let save_dir = dir.path().join("saves");
+        fs::create_dir_all(&save_dir).expect("create saves");
+
+        let payload = vec![7u8; 8192];
+        for folder in 0..20 {
+            let nested = save_dir.join(format!("slot-{folder}"));
+            fs::create_dir_all(&nested).expect("create nested");
+            for file_index in 0..20 {
+                let file_path = nested.join(format!("save-{file_index}.bin"));
+                fs::write(&file_path, &payload).expect("write save file");
+            }
+        }
+
+        let mut files = HashMap::new();
+        files.insert(
+            "root".to_string(),
+            vec![save_dir.to_string_lossy().to_string()],
+        );
+
+        let mut games = HashMap::new();
+        games.insert(
+            "Bench Game".to_string(),
+            SqobaGame {
+                files: Some(files),
+                registry: None,
+            },
+        );
+
+        let engine = BackupEngine {
+            manifest: Some(SqobaManifest { games }),
+        };
+
+        let backup_dir = dir.path().join("backup");
+        let start_backup = Instant::now();
+        let total_size = engine
+            .backup_game_with_threads_and_options(
+                "Bench Game",
+                &backup_dir,
+                4,
+                BackupOptions::directory(),
+            )
+            .expect("backup");
+        let backup_elapsed = start_backup.elapsed();
+
+        fs::remove_dir_all(&save_dir).expect("remove saves");
+
+        let start_restore = Instant::now();
+        engine
+            .restore_backup_with_threads(&backup_dir, 4)
+            .expect("restore");
+        let restore_elapsed = start_restore.elapsed();
+
+        println!(
+            "perf: backup_roundtrip bytes={} backup_ms={} restore_ms={}",
+            total_size,
+            backup_elapsed.as_millis(),
+            restore_elapsed.as_millis()
+        );
     }
 }

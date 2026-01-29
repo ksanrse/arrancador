@@ -42,6 +42,16 @@ pub fn init_database() -> Result<()> {
 
     let conn = Connection::open(&db_path)?;
 
+    init_schema(&conn)?;
+
+    let mut db = DB.lock().unwrap();
+    *db = Some(conn);
+
+    println!("Database initialized successfully");
+    Ok(())
+}
+
+pub(crate) fn init_schema(conn: &Connection) -> Result<()> {
     // Games table
     conn.execute(
         "CREATE TABLE IF NOT EXISTS games (
@@ -84,7 +94,8 @@ pub fn init_database() -> Result<()> {
         [],
     )?;
 
-    ensure_game_columns(&conn)?;
+    ensure_game_columns(conn)?;
+    ensure_game_indexes(conn)?;
 
     conn.execute(
         "CREATE TABLE IF NOT EXISTS playtime_daily (
@@ -119,6 +130,7 @@ pub fn init_database() -> Result<()> {
         )",
         [],
     )?;
+    ensure_backup_indexes(conn)?;
 
     // Settings table
     conn.execute(
@@ -160,10 +172,6 @@ pub fn init_database() -> Result<()> {
         )?;
     }
 
-    let mut db = DB.lock().unwrap();
-    *db = Some(conn);
-
-    println!("Database initialized successfully");
     Ok(())
 }
 
@@ -191,6 +199,26 @@ fn ensure_game_columns(conn: &Connection) -> Result<()> {
         )?;
     }
 
+    Ok(())
+}
+
+fn ensure_game_indexes(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_games_name ON games(name)",
+        [],
+    )?;
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_games_favorite_name ON games(is_favorite, name)",
+        [],
+    )?;
+    Ok(())
+}
+
+fn ensure_backup_indexes(conn: &Connection) -> Result<()> {
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_backups_game_created ON backups(game_id, created_at DESC)",
+        [],
+    )?;
     Ok(())
 }
 

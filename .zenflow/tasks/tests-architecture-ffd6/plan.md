@@ -170,7 +170,8 @@ Verification:
 - `pnpm test`
 - `pnpm run build`
 
-### [ ] Step: Performance Pass With Benchmarks
+### [x] Step: Performance Pass With Benchmarks
+<!-- chat-id: d87a663f-acc4-4e11-a954-3d02cb61485b -->
 
 Goal: measurably faster while staying identical functionally.
 
