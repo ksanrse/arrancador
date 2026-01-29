@@ -389,3 +389,81 @@ pub fn similarity_score(a: &str, b: &str) -> f32 {
     let union = set_a.union(&set_b).count() as f32;
     inter / union
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    #[test]
+    fn load_manifest_prefers_cache_when_present() {
+        let dir = tempdir().expect("tempdir");
+        let cache_path = dir.path().join("cache.json");
+        let example_root = dir.path().join("example");
+
+        let mut games = HashMap::new();
+        games.insert(
+            "Cached Game".to_string(),
+            SqobaGame {
+                files: None,
+                registry: None,
+            },
+        );
+        let manifest = SqobaManifest { games };
+        let json = serde_json::to_string(&manifest).expect("serialize manifest");
+        fs::write(&cache_path, json).expect("write cache");
+
+        let loaded = load_manifest_optional_with_paths(&cache_path, &example_root)
+            .expect("load manifest")
+            .expect("manifest present");
+
+        assert!(loaded.games.contains_key("Cached Game"));
+    }
+
+    #[test]
+    fn load_manifest_from_example_writes_cache() {
+        let dir = tempdir().expect("tempdir");
+        let cache_path = dir.path().join("cache.json");
+        let example_root = dir.path().join("example");
+        let example_sqoba = example_root.join("sqoba");
+        fs::create_dir_all(&example_sqoba).expect("create example dirs");
+
+        let mut games = HashMap::new();
+        games.insert(
+            "Example Game".to_string(),
+            SqobaGame {
+                files: None,
+                registry: None,
+            },
+        );
+        let manifest = SqobaManifest { games };
+        let json = serde_json::to_string(&manifest).expect("serialize manifest");
+        fs::write(example_sqoba.join("manifest.json"), json).expect("write manifest");
+
+        let loaded = load_manifest_optional_with_paths(&cache_path, &example_root)
+            .expect("load manifest")
+            .expect("manifest present");
+
+        assert!(loaded.games.contains_key("Example Game"));
+        assert!(cache_path.exists());
+    }
+
+    #[test]
+    fn find_game_entry_matches_normalized_name() {
+        let mut games = HashMap::new();
+        games.insert(
+            "The Witcher 3: Game of the Year Edition".to_string(),
+            SqobaGame {
+                files: None,
+                registry: None,
+            },
+        );
+        let manifest = SqobaManifest { games };
+
+        let found = manifest
+            .find_game_entry("witcher 3")
+            .expect("find game");
+        assert_eq!(found.0, "The Witcher 3: Game of the Year Edition");
+    }
+}

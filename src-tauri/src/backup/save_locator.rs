@@ -613,3 +613,72 @@ fn find_steam_path() -> Option<PathBuf> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use tempfile::tempdir;
+
+    #[test]
+    fn locate_game_saves_with_override_directory() {
+        let dir = tempdir().expect("tempdir");
+        let save_dir = dir.path().join("saves");
+        fs::create_dir_all(&save_dir).expect("create save dir");
+
+        let file_a = save_dir.join("slot1.sav");
+        let file_b = save_dir.join("slot2.sav");
+        fs::write(&file_a, b"alpha").expect("write file a");
+        fs::write(&file_b, b"beta").expect("write file b");
+
+        let save_path = save_dir.to_string_lossy().to_string();
+        let discovery = locate_game_saves("Test Game", None, Some(&save_path))
+        .expect("locate saves")
+        .expect("discovery present");
+
+        assert_eq!(discovery.files.len(), 2);
+        assert!(discovery.total_size > 0);
+        assert_eq!(discovery.roots.len(), 1);
+    }
+
+    #[test]
+    fn locate_game_saves_with_manifest_entry() {
+        let dir = tempdir().expect("tempdir");
+        let save_dir = dir.path().join("manifest_saves");
+        fs::create_dir_all(&save_dir).expect("create save dir");
+        let file_a = save_dir.join("slot1.sav");
+        fs::write(&file_a, b"alpha").expect("write file");
+
+        let mut files = HashMap::new();
+        files.insert(
+            "save".to_string(),
+            vec![save_dir.to_string_lossy().to_string()],
+        );
+        let mut games = HashMap::new();
+        games.insert(
+            "Manifest Game".to_string(),
+            SqobaGame {
+                files: Some(files),
+                registry: None,
+            },
+        );
+        let manifest = SqobaManifest { games };
+
+        let discovery = locate_game_saves("Manifest Game", Some(&manifest), None)
+            .expect("locate saves")
+            .expect("discovery present");
+
+        assert_eq!(discovery.files.len(), 1);
+        assert_eq!(discovery.roots.len(), 1);
+        assert_eq!(discovery.roots[0].path, save_dir);
+    }
+
+    #[test]
+    fn locate_game_saves_reports_missing_override_path() {
+        let dir = tempdir().expect("tempdir");
+        let missing_path = dir.path().join("missing");
+        let missing_path = missing_path.to_string_lossy().to_string();
+        let result = locate_game_saves("Missing", None, Some(&missing_path));
+        assert!(result.is_err());
+    }
+}

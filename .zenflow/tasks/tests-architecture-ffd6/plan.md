@@ -109,7 +109,8 @@ Notes:
 Verification:
 - `pnpm test`
 
-### [ ] Step: Backend Unit And Integration Tests
+### [x] Step: Backend Unit And Integration Tests
+<!-- chat-id: a947d1d4-a139-4cff-b10d-0aeee6f2623a -->
 
 Goal: protect persistence, backup engine, and tracker from regressions.
 
