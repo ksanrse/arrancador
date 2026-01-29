@@ -190,7 +190,8 @@ Likely optimizations (confirm via profiling):
 Verification:
 - Run the same benchmark scripts before/after and record results in the task artifacts.
 
-### [ ] Step: End-To-End Smoke Tests (Optional But Recommended)
+### [x] Step: End-To-End Smoke Tests (Optional But Recommended)
+<!-- chat-id: ec0016f8-5579-48bb-9341-9dc19557049b -->
 
 Goal: catch “wiring” regressions that unit tests can’t.
 

@@ -28,4 +28,6 @@ target
 
 dist
 .vscode
+playwright-report
+test-results
 

@@ -520,7 +520,11 @@ export default function Scan() {
               </div>
             </>
           ) : (
-            <Button onClick={startScan} className="gap-2 w-full sm:w-auto">
+            <Button
+              onClick={startScan}
+              className="gap-2 w-full sm:w-auto"
+              data-testid="scan-start"
+            >
               <FolderOpen className="w-4 h-4" />
               Выбрать папку
             </Button>
