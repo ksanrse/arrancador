@@ -1,0 +1,167 @@
+name: Arrancador Daily Release
+
+on:
+  schedule:
+    # 01:00 UTC = 04:00 Moscow time
+    - cron: "0 1 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check for new commits and set version
+        id: check
+        shell: bash
+        run: |
+          # Get latest nightly tag (|| true prevents exit code 1 when no matches)
+          LATEST_TAG=$(git tag --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-nightly\.' | head -1 || true)
+          echo "Latest nightly tag: '$LATEST_TAG'"
+
+          # Determine if we should build
+          if [ -z "$LATEST_TAG" ]; then
+            echo "First nightly release"
+            echo "should_build=true" >> $GITHUB_OUTPUT
+            BASE_VERSION="0.0.0"
+
+            echo "## Changes" > changelog.md
+            echo "" >> changelog.md
+            git log --pretty=format:"- %h %s (@%an)" -20 >> changelog.md
+          else
+            COMMIT_COUNT=$(git rev-list ${LATEST_TAG}..HEAD --count)
+            echo "Commits since $LATEST_TAG: $COMMIT_COUNT"
+
+            if [ "$COMMIT_COUNT" -gt 0 ] || [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+              echo "should_build=true" >> $GITHUB_OUTPUT
+
+              echo "## Changes since ${LATEST_TAG}" > changelog.md
+              echo "" >> changelog.md
+              git log ${LATEST_TAG}..HEAD --pretty=format:"- %h %s (@%an)" >> changelog.md
+            else
+              echo "should_build=false" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+
+            # Extract base version (remove v prefix and -nightly.* suffix)
+            BASE_VERSION=$(echo "$LATEST_TAG" | sed 's/^v//' | sed 's/-nightly.*//')
+          fi
+
+          echo "Base version: $BASE_VERSION"
+
+          # Parse and increment version
+          MAJOR=$(echo "$BASE_VERSION" | cut -d. -f1)
+          MINOR=$(echo "$BASE_VERSION" | cut -d. -f2)
+          PATCH=$(echo "$BASE_VERSION" | cut -d. -f3)
+
+          # Increment patch version
+          PATCH=$((PATCH + 1))
+
+          # Handle overflow (MSI limit is 255)
+          if [ "$PATCH" -ge 256 ]; then
+            MINOR=$((MINOR + 1))
+            PATCH=0
+          fi
+          if [ "$MINOR" -ge 256 ]; then
+            MAJOR=$((MAJOR + 1))
+            MINOR=0
+          fi
+
+          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          DATE_SUFFIX=$(date -u '+%Y%m%d')
+          TAG_NAME="v${NEW_VERSION}-nightly.${DATE_SUFFIX}"
+
+          echo "New version: $NEW_VERSION"
+          echo "Tag name: $TAG_NAME"
+
+          echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "date_suffix=${DATE_SUFFIX}" >> $GITHUB_OUTPUT
+
+          if [ -f changelog.md ]; then
+            echo ""
+            echo "Changelog:"
+            cat changelog.md
+          fi
+
+      - name: Setup Node.js
+        if: steps.check.outputs.should_build == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Setup Bun
+        if: steps.check.outputs.should_build == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "latest"
+
+      - name: Install Rust
+        if: steps.check.outputs.should_build == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        if: steps.check.outputs.should_build == 'true'
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install dependencies
+        if: steps.check.outputs.should_build == 'true'
+        run: bun install
+
+      - name: Update version
+        if: steps.check.outputs.should_build == 'true'
+        shell: bash
+        run: |
+          VERSION="${{ steps.check.outputs.version }}"
+          echo "Setting app version to: $VERSION"
+          sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"${VERSION}\"/" src-tauri/tauri.conf.json
+          sed -i "s/^version = \"[^\"]*\"/version = \"${VERSION}\"/" src-tauri/Cargo.toml
+
+          echo "Verifying changes:"
+          grep '"version"' src-tauri/tauri.conf.json
+          grep '^version' src-tauri/Cargo.toml
+
+      - name: Build
+        if: steps.check.outputs.should_build == 'true'
+        env:
+          TAURI_UPDATE_ENDPOINT: https://github.com/${{ github.repository }}/releases/latest/download/latest.json
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          TAURI_SIGNING_PUBLIC_KEY: ${{ secrets.TAURI_SIGNING_PUBLIC_KEY }}
+        run: bun run tauri build
+
+      - name: Prepare files
+        if: steps.check.outputs.should_build == 'true'
+        shell: bash
+        run: |
+          VERSION="${{ steps.check.outputs.version }}"
+          mkdir -p release
+
+          find src-tauri/target -name "*.msi" -type f | head -1 | xargs -I {} cp {} "release/arrancador_${VERSION}_x64.msi"
+          find src-tauri/target -path "*/nsis/*.exe" -type f | head -1 | xargs -I {} cp {} "release/arrancador_${VERSION}_x64-setup.exe"
+          find src-tauri/target -name "latest.json" -type f | head -1 | xargs -I {} cp {} "release/latest.json"
+          find src-tauri/target -name "*.sig" -type f | xargs -I {} cp {} "release/"
+
+          echo "Release files:"
+          ls -la release/
+
+      - name: Create Release
+        if: steps.check.outputs.should_build == 'true'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.check.outputs.tag_name }}
+          name: Arrancador ${{ steps.check.outputs.tag_name }}
+          body_path: changelog.md
+          files: release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

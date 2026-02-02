@@ -6,6 +6,7 @@ use chrono::Utc;
 use rusqlite::{params, Result};
 #[cfg(target_os = "windows")]
 use std::ffi::OsStr;
+use std::fs;
 #[cfg(target_os = "windows")]
 use std::os::windows::ffi::OsStrExt;
 #[cfg(target_os = "windows")]
@@ -31,11 +32,60 @@ use windows::Win32::System::Threading::{
 #[cfg(target_os = "windows")]
 use windows::Win32::UI::Shell::{IShellLinkW, ShellLink};
 
+const GAME_PATH_TOKEN: &str = "{PATHTOGAME}";
 const GAME_SELECT: &str = "SELECT id, name, exe_path, exe_name, rawg_id, description, released,
              background_image, metacritic, rating, genres, platforms, developers, publishers,
              cover_image, is_favorite, play_count, total_playtime, last_played, date_added,
              backup_enabled, last_backup, backup_count, save_path, user_rating, user_note
              FROM games";
+
+fn tokenise_save_path_if_possible(
+    conn: &rusqlite::Connection,
+    game_id: &str,
+    save_path: &str,
+) -> String {
+    if save_path.contains(GAME_PATH_TOKEN) {
+        return save_path.to_string();
+    }
+
+    let save_path_pb = PathBuf::from(save_path);
+    if !save_path_pb.is_absolute() || !save_path_pb.exists() {
+        return save_path.to_string();
+    }
+
+    // If the chosen save path sits inside the game's directory, store it as a template so it
+    // survives moving the game folder (as long as exe_path is updated).
+    let exe_path: Option<String> = conn
+        .prepare("SELECT exe_path FROM games WHERE id = ?1")
+        .and_then(|mut stmt| stmt.query_row(params![game_id], |row| row.get(0)))
+        .ok();
+    let Some(exe_path) = exe_path else {
+        return save_path.to_string();
+    };
+    let Some(game_dir) = Path::new(&exe_path).parent() else {
+        return save_path.to_string();
+    };
+
+    let Ok(game_dir) = fs::canonicalize(game_dir) else {
+        return save_path.to_string();
+    };
+    let Ok(save_path_pb) = fs::canonicalize(save_path_pb) else {
+        return save_path.to_string();
+    };
+
+    let Ok(relative) = save_path_pb.strip_prefix(&game_dir) else {
+        return save_path.to_string();
+    };
+
+    if relative.as_os_str().is_empty() {
+        return GAME_PATH_TOKEN.to_string();
+    }
+
+    let mut out = String::from(GAME_PATH_TOKEN);
+    out.push(std::path::MAIN_SEPARATOR);
+    out.push_str(&relative.to_string_lossy());
+    out
+}
 
 fn map_game_row(row: &rusqlite::Row) -> Result<Game> {
     Ok(Game {
@@ -224,7 +274,7 @@ pub fn update_game<D: Db>(db: &D, update: UpdateGame) -> Result<Game, String> {
             let normalized = if save_path.trim().is_empty() {
                 None
             } else {
-                Some(save_path.clone())
+                Some(tokenise_save_path_if_possible(conn, &update.id, save_path))
             };
             let checked = normalized.is_some();
             params_vec.push(Box::new(normalized));

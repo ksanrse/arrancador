@@ -6,6 +6,7 @@ import {
   Gamepad2,
   Monitor,
   Settings,
+  Sparkles,
   Star,
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -19,6 +20,7 @@ const SIDEBAR_STORAGE_KEY = "arrancador_sidebar_collapsed";
 const navItems = [
   { title: "Библиотека", to: "/", icon: Gamepad2 },
   { title: "Сканирование", to: "/scan", icon: FolderSearch },
+  { title: "SQOBA", to: "/sqoba", icon: Sparkles },
   { title: "Статистика", to: "/statistics", icon: BarChart2 },
   { title: "Система", to: "/system", icon: Monitor },
   { title: "Настройки", to: "/settings", icon: Settings },

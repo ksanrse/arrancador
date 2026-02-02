@@ -33,6 +33,24 @@ pub fn locate_game_saves(
     manifest: Option<&SqobaManifest>,
     override_path: Option<&str>,
 ) -> Result<Option<SaveDiscovery>, String> {
+    let roots = locate_game_save_roots(game_name, manifest, override_path)?;
+    if roots.is_empty() {
+        return Ok(None);
+    }
+
+    let discovery = collect_files(&roots)?;
+    if discovery.files.is_empty() {
+        return Ok(None);
+    }
+
+    Ok(Some(discovery))
+}
+
+pub fn locate_game_save_roots(
+    game_name: &str,
+    manifest: Option<&SqobaManifest>,
+    override_path: Option<&str>,
+) -> Result<Vec<SaveRoot>, String> {
     let mut roots = Vec::new();
 
     if let Some(path) = override_path {
@@ -40,7 +58,10 @@ pub fn locate_game_saves(
         if path.exists() {
             roots.push(path);
         } else {
-            return Err(format!("Save path does not exist: {}", path.display()));
+            return Err(format!(
+                "Путь к сохранениям не существует: {}",
+                path.display()
+            ));
         }
     }
 
@@ -57,16 +78,7 @@ pub fn locate_game_saves(
     }
 
     let roots = build_roots(roots);
-    if roots.is_empty() {
-        return Ok(None);
-    }
-
-    let discovery = collect_files(&roots)?;
-    if discovery.files.is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some(discovery))
+    Ok(roots)
 }
 
 fn build_roots(paths: Vec<PathBuf>) -> Vec<SaveRoot> {
@@ -662,7 +674,7 @@ mod tests {
                 registry: None,
             },
         );
-        let manifest = SqobaManifest { games };
+        let manifest = SqobaManifest::from_games(games);
 
         let discovery = locate_game_saves("Manifest Game", Some(&manifest), None)
             .expect("locate saves")

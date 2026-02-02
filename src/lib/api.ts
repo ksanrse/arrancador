@@ -5,6 +5,7 @@ import type {
   UpdateGame,
   Backup,
   BackupInfo,
+  SavePathLookup,
   RestoreCheck,
   RawgGame,
   RawgGameDetails,
@@ -58,6 +59,9 @@ export const backupApi = {
   setBackupDirectory: (path: string) =>
     invoke<void>("set_backup_directory", { path }),
   getBackupDirectory: () => invoke<string>("get_backup_directory_setting"),
+  refreshSqobaManifest: () => invoke<void>("refresh_sqoba_manifest"),
+  findGameSavePaths: (gameName: string, gameId?: string) =>
+    invoke<SavePathLookup>("find_game_save_paths", { gameName, gameId }),
   findGameSaves: (gameName: string, gameId?: string) =>
     invoke<BackupInfo | null>("find_game_saves", { gameName, gameId }),
   create: (gameId: string, gameName: string, isAuto: boolean, notes?: string) =>

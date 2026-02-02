@@ -119,6 +119,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
@@ -173,6 +174,8 @@ pub fn run() {
             set_ludusavi_path,
             set_backup_directory,
             get_backup_directory_setting,
+            refresh_sqoba_manifest,
+            find_game_save_paths,
             find_game_saves,
             create_backup,
             get_game_backups,

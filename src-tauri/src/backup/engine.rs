@@ -1,4 +1,6 @@
-use crate::backup::save_locator::{locate_game_saves, SaveDiscovery};
+use crate::backup::save_locator::{
+    locate_game_save_roots, locate_game_saves, SaveDiscovery, SaveRoot,
+};
 use crate::backup::sqoba_manifest::{SqobaGame, SqobaManifest};
 use lazy_static::lazy_static;
 use rayon::prelude::*;
@@ -146,6 +148,16 @@ impl BackupEngine {
     }
 
     pub fn load_manifest(&mut self) -> Result<(), String> {
+        // Manifest parsing is fairly expensive; keep it in memory and avoid
+        // reloading on every backup/discovery call.
+        if self.manifest.is_some() {
+            return Ok(());
+        }
+        self.manifest = crate::backup::sqoba_manifest::load_manifest_optional()?;
+        Ok(())
+    }
+
+    pub fn reload_manifest(&mut self) -> Result<(), String> {
         self.manifest = crate::backup::sqoba_manifest::load_manifest_optional()?;
         Ok(())
     }
@@ -161,6 +173,14 @@ impl BackupEngine {
         override_path: Option<&str>,
     ) -> Result<Option<SaveDiscovery>, String> {
         locate_game_saves(name, self.manifest.as_ref(), override_path)
+    }
+
+    pub fn discover_game_save_roots(
+        &self,
+        name: &str,
+        override_path: Option<&str>,
+    ) -> Result<Vec<SaveRoot>, String> {
+        locate_game_save_roots(name, self.manifest.as_ref(), override_path)
     }
 
     fn find_game_entry_with_key(&self, name: &str) -> Option<(String, SqobaGame)> {
@@ -255,10 +275,10 @@ impl BackupEngine {
             None => {
                 let suggestions = self.suggest_games(name, 5);
                 if suggestions.is_empty() {
-                    return Err(format!("No save data found for '{}'", name));
+                    return Err(format!("Сохранения не найдены для '{}'", name));
                 }
                 return Err(format!(
-                    "No save data found for '{}'. Closest matches: {}",
+                    "Сохранения не найдены для '{}'. Ближайшие совпадения: {}",
                     name,
                     suggestions.join(", ")
                 ));
@@ -380,12 +400,12 @@ impl BackupEngine {
         let mut archive = ZipArchive::new(file).map_err(|e| e.to_string())?;
 
         let manifest = read_manifest_from_zip(&mut archive)?
-            .ok_or_else(|| "Backup manifest missing in archive".to_string())?;
+            .ok_or_else(|| "В архиве отсутствует манифест бэкапа".to_string())?;
 
         for entry in manifest.files {
             let mut zipped = archive
                 .by_name(&entry.backup_path)
-                .map_err(|e| format!("Missing file in archive: {}", e))?;
+                .map_err(|e| format!("В архиве отсутствует файл: {}", e))?;
 
             let target_path = PathBuf::from(&entry.original_path);
             if let Some(parent) = target_path.parent() {
@@ -599,7 +619,7 @@ impl BackupEngine {
         let backup = mapping
             .backups
             .last()
-            .ok_or("No backup entries in mapping")?;
+            .ok_or("В mapping.yaml нет записей бэкапов")?;
 
         let mut inverse: HashMap<String, String> = HashMap::new();
         for (key, prefix) in &mapping.drives {
@@ -817,7 +837,7 @@ mod tests {
         );
 
         let engine = BackupEngine {
-            manifest: Some(SqobaManifest { games }),
+            manifest: Some(SqobaManifest::from_games(games)),
         };
 
         let backup_path = dir.path().join("backup");
@@ -882,7 +902,7 @@ mod tests {
         );
 
         let engine = BackupEngine {
-            manifest: Some(SqobaManifest { games }),
+            manifest: Some(SqobaManifest::from_games(games)),
         };
 
         let backup_path = dir.path().join("backup.sqoba.zip");
@@ -951,7 +971,7 @@ mod perf_bench {
         );
 
         let engine = BackupEngine {
-            manifest: Some(SqobaManifest { games }),
+            manifest: Some(SqobaManifest::from_games(games)),
         };
 
         let backup_dir = dir.path().join("backup");

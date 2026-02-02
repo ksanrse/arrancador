@@ -1,7 +1,7 @@
 import { disable, enable, isEnabled } from "@tauri-apps/plugin-autostart";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useCallback, useEffect, useState } from "react";
-import { metadataApi, settingsApi } from "@/lib/api";
+import { backupApi, metadataApi, settingsApi } from "@/lib/api";
 import type { AppSettings } from "@/types";
 
 const clampNumber = (value: number, min: number, max: number) =>
@@ -134,12 +134,17 @@ export function useSettingsState() {
     const selected = await open({
       directory: true,
       multiple: false,
-      title: "\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043f\u0430\u043f\u043a\u0443 \u0434\u043b\u044f \u0431\u044d\u043a\u0430\u043f\u043e\u0432",
+      title:
+        "\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043f\u0430\u043f\u043a\u0443 \u0434\u043b\u044f \u0431\u044d\u043a\u0430\u043f\u043e\u0432",
     });
 
     if (selected) {
       setBackupDirectory(selected as string);
     }
+  }, []);
+
+  const refreshSqobaManifest = useCallback(async () => {
+    await backupApi.refreshSqobaManifest();
   }, []);
 
   useEffect(() => {
@@ -170,5 +175,6 @@ export function useSettingsState() {
     toggleAutoStart,
     saveSettings,
     selectBackupDirectory,
+    refreshSqobaManifest,
   };
 }

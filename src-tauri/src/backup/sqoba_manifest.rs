@@ -4,11 +4,25 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
+use std::time::Duration;
+
+use flate2::read::GzDecoder;
+use lazy_static::lazy_static;
+use regex::Regex;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SqobaManifest {
     pub games: HashMap<String, SqobaGame>,
+
+    // Derived data for fast lookups; never serialized.
+    #[serde(skip)]
+    index: SqobaManifestIndex,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SqobaManifestIndex {
+    normalized_keys: Vec<(String, String)>,
+    normalized_exact: HashMap<String, String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -18,21 +32,48 @@ pub struct SqobaGame {
 }
 
 impl SqobaManifest {
+    pub(crate) fn from_games(games: HashMap<String, SqobaGame>) -> Self {
+        let mut manifest = Self {
+            games,
+            index: SqobaManifestIndex::default(),
+        };
+        manifest.rebuild_index();
+        manifest
+    }
+
+    fn rebuild_index(&mut self) {
+        self.index.normalized_keys.clear();
+        self.index.normalized_exact.clear();
+        self.index.normalized_keys.reserve(self.games.len());
+
+        for key in self.games.keys() {
+            let normalized = normalize_name(key);
+            self.index
+                .normalized_exact
+                .entry(normalized.clone())
+                .or_insert_with(|| key.clone());
+            self.index.normalized_keys.push((key.clone(), normalized));
+        }
+    }
+
     pub fn find_game_entry(&self, name: &str) -> Option<(String, SqobaGame)> {
         if let Some(entry) = self.games.get(name) {
             return Some((name.to_string(), entry.clone()));
         }
 
         let normalized = normalize_name(name);
+
+        if let Some(key) = self.index.normalized_exact.get(&normalized) {
+            return self
+                .games
+                .get(key)
+                .cloned()
+                .map(|entry| (key.clone(), entry));
+        }
+
         let mut best: Option<(String, f32)> = None;
-
-        for (key, entry) in &self.games {
-            let key_norm = normalize_name(key);
-            if key_norm == normalized {
-                return Some((key.clone(), entry.clone()));
-            }
-
-            let score = similarity_score(&normalized, &key_norm);
+        for (key, key_norm) in &self.index.normalized_keys {
+            let score = similarity_score(&normalized, key_norm);
             if best.as_ref().map(|b| score > b.1).unwrap_or(true) {
                 best = Some((key.clone(), score));
             }
@@ -54,12 +95,10 @@ impl SqobaManifest {
     pub fn suggest_games(&self, name: &str, limit: usize) -> Vec<String> {
         let normalized = normalize_name(name);
         let mut scored: Vec<(String, f32)> = self
-            .games
-            .keys()
-            .map(|key| {
-                let score = similarity_score(&normalized, &normalize_name(key));
-                (key.clone(), score)
-            })
+            .index
+            .normalized_keys
+            .iter()
+            .map(|(key, key_norm)| (key.clone(), similarity_score(&normalized, key_norm)))
             .filter(|(_, score)| *score >= 0.4)
             .collect();
 
@@ -69,41 +108,21 @@ impl SqobaManifest {
 }
 
 const CACHE_FILE_NAME: &str = "sqoba_manifest.json";
+const EMBEDDED_MANIFEST_GZ: &[u8] = include_bytes!("../../resources/sqoba_manifest.yaml.gz");
+
+lazy_static! {
+    static ref NORMALIZE_RE: Regex = Regex::new(r"[^a-z0-9]+").expect("regex for normalize_name");
+}
 
 #[allow(dead_code)]
 pub fn load_manifest() -> Result<SqobaManifest, String> {
     let manifest = load_manifest_optional()?;
-    manifest.ok_or_else(|| "SQOBA manifest not found in example data".to_string())
+    manifest.ok_or_else(|| "Манифест SQOBA не найден (кэш пуст и загрузка не удалась)".to_string())
 }
 
 pub fn load_manifest_optional() -> Result<Option<SqobaManifest>, String> {
     let cache_path = default_cache_path();
-    let example_root = PathBuf::from("example");
-    load_manifest_optional_with_paths(&cache_path, &example_root)
-}
-
-#[allow(dead_code)]
-pub fn load_manifest_with_paths(
-    cache_path: &Path,
-    example_root: &Path,
-) -> Result<SqobaManifest, String> {
-    load_manifest_optional_with_paths(cache_path, example_root)?
-        .ok_or_else(|| "SQOBA manifest not found in example data".to_string())
-}
-
-pub fn load_manifest_optional_with_paths(
-    cache_path: &Path,
-    example_root: &Path,
-) -> Result<Option<SqobaManifest>, String> {
-    if let Some(manifest) = load_manifest_from_cache(cache_path) {
-        return Ok(Some(manifest));
-    }
-
-    let manifest = load_manifest_from_example(example_root)?;
-    if let Some(manifest) = &manifest {
-        write_manifest_cache(cache_path, manifest)?;
-    }
-    Ok(manifest)
+    load_manifest_optional_with_cache_and_fetcher(&cache_path, download_ludusavi_manifest_yaml)
 }
 
 fn default_cache_path() -> PathBuf {
@@ -120,7 +139,9 @@ fn load_manifest_from_cache(cache_path: &Path) -> Option<SqobaManifest> {
 
     let file = File::open(cache_path).ok()?;
     let reader = std::io::BufReader::new(file);
-    serde_json::from_reader(reader).ok()
+    let mut manifest: SqobaManifest = serde_json::from_reader(reader).ok()?;
+    manifest.rebuild_index();
+    Some(manifest)
 }
 
 fn write_manifest_cache(cache_path: &Path, manifest: &SqobaManifest) -> Result<(), String> {
@@ -132,125 +153,108 @@ fn write_manifest_cache(cache_path: &Path, manifest: &SqobaManifest) -> Result<(
     Ok(())
 }
 
-fn load_manifest_from_example(example_root: &Path) -> Result<Option<SqobaManifest>, String> {
-    if !example_root.exists() {
-        return Ok(None);
+pub fn refresh_manifest_from_network() -> Result<(), String> {
+    let cache_path = default_cache_path();
+    let Some(text) = download_ludusavi_manifest_yaml()? else {
+        return Err("Не удалось скачать манифест".to_string());
+    };
+
+    let manifest = manifest_from_yaml(&text)?;
+    write_manifest_cache(&cache_path, &manifest)?;
+    Ok(())
+}
+
+fn load_manifest_optional_with_cache_and_fetcher<F>(
+    cache_path: &Path,
+    fetcher: F,
+) -> Result<Option<SqobaManifest>, String>
+where
+    F: FnOnce() -> Result<Option<String>, String>,
+{
+    if let Some(manifest) = load_manifest_from_cache(cache_path) {
+        return Ok(Some(manifest));
     }
 
-    let candidates = candidate_manifest_paths(example_root);
-    for path in candidates {
-        if let Ok(manifest) = build_manifest_from_file(&path) {
-            return Ok(Some(manifest));
+    if let Some(text) = fetcher()? {
+        let manifest = manifest_from_yaml(&text)?;
+        write_manifest_cache(cache_path, &manifest)?;
+        return Ok(Some(manifest));
+    }
+
+    let Some(text) = load_embedded_manifest_yaml() else {
+        return Ok(None);
+    };
+
+    let manifest = manifest_from_yaml(&text)?;
+    write_manifest_cache(cache_path, &manifest)?;
+    Ok(Some(manifest))
+}
+
+fn download_ludusavi_manifest_yaml() -> Result<Option<String>, String> {
+    // We cache the parsed manifest, so this should run rarely (only when cache is missing).
+    // Try both default branch names to be resilient to repo changes.
+    const URLS: [&str; 2] = [
+        "https://raw.githubusercontent.com/mtkennerly/ludusavi-manifest/main/data/manifest.yaml",
+        "https://raw.githubusercontent.com/mtkennerly/ludusavi-manifest/master/data/manifest.yaml",
+    ];
+
+    let client = match reqwest::blocking::Client::builder()
+        .user_agent("arrancador (SQOBA)")
+        .connect_timeout(Duration::from_secs(5))
+        .timeout(Duration::from_secs(15))
+        .build()
+    {
+        Ok(client) => client,
+        Err(_) => return Ok(None),
+    };
+
+    for url in URLS {
+        let resp = match client.get(url).send() {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+
+        if !resp.status().is_success() {
+            continue;
         }
+
+        let text = match resp.text() {
+            Ok(text) => text,
+            Err(_) => continue,
+        };
+        if text.trim().is_empty() {
+            continue;
+        }
+
+        return Ok(Some(text));
     }
 
     Ok(None)
 }
 
-fn candidate_manifest_paths(example_root: &Path) -> Vec<PathBuf> {
-    let mut out = Vec::new();
-    let direct_candidates = vec![
-        example_root.join("sqoba").join("manifest.json"),
-        example_root.join("sqoba").join("manifest.yaml"),
-        example_root.join("sqoba").join("manifest.yml"),
-        example_root.join("sqoba_manifest.json"),
-        example_root.join("sqoba_manifest.yaml"),
-        example_root.join("sqoba_manifest.yml"),
-        example_root
-            .join("ludusavi-manifest")
-            .join("data")
-            .join("manifest.yaml"),
-        example_root
-            .join("ludusavi-manifest-master")
-            .join("data")
-            .join("manifest.yaml"),
-        example_root.join("ludusavi").join("manifest.yaml"),
-        example_root.join("ludusavi").join("manifest.yml"),
-        example_root
-            .join("ludusavi")
-            .join("data")
-            .join("manifest.yaml"),
-        example_root.join("manifest.json"),
-        example_root.join("manifest.yaml"),
-        example_root.join("manifest.yml"),
-    ];
-
-    for path in direct_candidates {
-        if path.exists() {
-            out.push(path);
-        }
+fn load_embedded_manifest_yaml() -> Option<String> {
+    if EMBEDDED_MANIFEST_GZ.is_empty() {
+        return None;
     }
 
-    if out.is_empty() {
-        out.extend(find_manifest_files(example_root));
-    }
-
-    dedup_paths(out)
-}
-
-fn find_manifest_files(example_root: &Path) -> Vec<PathBuf> {
-    let mut matches = Vec::new();
-    for entry in WalkDir::new(example_root)
-        .max_depth(6)
-        .into_iter()
-        .filter_map(|e| e.ok())
-    {
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().to_lowercase();
-        if matches_manifest_name(&name) {
-            matches.push(entry.path().to_path_buf());
-        }
-    }
-
-    matches
-}
-
-fn matches_manifest_name(name: &str) -> bool {
-    matches!(
-        name,
-        "manifest.yaml"
-            | "manifest.yml"
-            | "manifest.json"
-            | "sqoba_manifest.json"
-            | "sqoba_manifest.yaml"
-            | "sqoba_manifest.yml"
-            | "sqoba-manifest.json"
-            | "sqoba-manifest.yaml"
-            | "sqoba-manifest.yml"
-    )
-}
-
-fn build_manifest_from_file(path: &Path) -> Result<SqobaManifest, String> {
+    let mut decoder = GzDecoder::new(EMBEDDED_MANIFEST_GZ);
     let mut text = String::new();
-    File::open(path)
-        .map_err(|e| e.to_string())?
-        .read_to_string(&mut text)
-        .map_err(|e| e.to_string())?;
-
-    match path.extension().and_then(|s| s.to_str()).unwrap_or("") {
-        "json" => serde_json::from_str(&text).map_err(|e| e.to_string()),
-        _ => manifest_from_yaml(&text),
+    if decoder.read_to_string(&mut text).is_err() {
+        return None;
     }
-}
 
-fn dedup_paths(paths: Vec<PathBuf>) -> Vec<PathBuf> {
-    let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    for path in paths {
-        if seen.insert(path.clone()) {
-            out.push(path);
-        }
+    if text.trim().is_empty() {
+        None
+    } else {
+        Some(text)
     }
-    out
 }
 
 fn manifest_from_yaml(text: &str) -> Result<SqobaManifest, String> {
     let root: YamlValue = serde_yaml::from_str(text).map_err(|e| e.to_string())?;
     let mapping = root
         .as_mapping()
-        .ok_or_else(|| "Invalid manifest format".to_string())?;
+        .ok_or_else(|| "Неверный формат манифеста".to_string())?;
 
     let mut games: HashMap<String, SqobaGame> = HashMap::new();
 
@@ -292,7 +296,7 @@ fn manifest_from_yaml(text: &str) -> Result<SqobaManifest, String> {
         games.insert(name, game_manifest);
     }
 
-    Ok(SqobaManifest { games })
+    Ok(SqobaManifest::from_games(games))
 }
 
 fn extract_tags(meta: &YamlValue) -> Vec<String> {
@@ -342,8 +346,7 @@ fn is_path_applicable(meta: &YamlValue) -> bool {
 
 pub fn normalize_name(name: &str) -> String {
     let lower = name.to_lowercase();
-    let re = regex::Regex::new(r"[^a-z0-9]+").unwrap();
-    let cleaned = re.replace_all(&lower, " ");
+    let cleaned = NORMALIZE_RE.replace_all(&lower, " ");
     let stop_words = [
         "the",
         "a",
@@ -400,7 +403,6 @@ mod tests {
     fn load_manifest_prefers_cache_when_present() {
         let dir = tempdir().expect("tempdir");
         let cache_path = dir.path().join("cache.json");
-        let example_root = dir.path().join("example");
 
         let mut games = HashMap::new();
         games.insert(
@@ -410,38 +412,33 @@ mod tests {
                 registry: None,
             },
         );
-        let manifest = SqobaManifest { games };
+        let manifest = SqobaManifest::from_games(games);
         let json = serde_json::to_string(&manifest).expect("serialize manifest");
         fs::write(&cache_path, json).expect("write cache");
 
-        let loaded = load_manifest_optional_with_paths(&cache_path, &example_root)
-            .expect("load manifest")
-            .expect("manifest present");
+        let loaded = load_manifest_optional_with_cache_and_fetcher(&cache_path, || {
+            panic!("cache should be used, fetcher must not run")
+        })
+        .expect("load manifest")
+        .expect("manifest present");
 
         assert!(loaded.games.contains_key("Cached Game"));
     }
 
     #[test]
-    fn load_manifest_from_example_writes_cache() {
+    fn load_manifest_from_fetcher_writes_cache() {
         let dir = tempdir().expect("tempdir");
         let cache_path = dir.path().join("cache.json");
-        let example_root = dir.path().join("example");
-        let example_sqoba = example_root.join("sqoba");
-        fs::create_dir_all(&example_sqoba).expect("create example dirs");
 
-        let mut games = HashMap::new();
-        games.insert(
-            "Example Game".to_string(),
-            SqobaGame {
-                files: None,
-                registry: None,
-            },
-        );
-        let manifest = SqobaManifest { games };
-        let json = serde_json::to_string(&manifest).expect("serialize manifest");
-        fs::write(example_sqoba.join("manifest.json"), json).expect("write manifest");
+        let yaml = r#"
+Example Game:
+  files:
+    "<winLocalAppData>/Example/save.dat":
+      tags: ["save"]
+"#
+        .to_string();
 
-        let loaded = load_manifest_optional_with_paths(&cache_path, &example_root)
+        let loaded = load_manifest_optional_with_cache_and_fetcher(&cache_path, || Ok(Some(yaml)))
             .expect("load manifest")
             .expect("manifest present");
 
@@ -459,7 +456,7 @@ mod tests {
                 registry: None,
             },
         );
-        let manifest = SqobaManifest { games };
+        let manifest = SqobaManifest::from_games(games);
 
         let found = manifest.find_game_entry("witcher 3").expect("find game");
         assert_eq!(found.0, "The Witcher 3: Game of the Year Edition");

@@ -44,6 +44,8 @@ lazy_static::lazy_static! {
     static ref BACKUP_ENGINE: Mutex<BackupEngine> = Mutex::new(BackupEngine::new());
 }
 
+const SAVE_PATH_GAME_TOKEN: &str = "{PATHTOGAME}";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Backup {
     pub id: String,
@@ -62,6 +64,12 @@ pub struct BackupInfo {
     pub registry_path: Option<String>,
     pub total_size: u64,
     pub files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavePathLookup {
+    pub save_path: Option<String>,
+    pub candidates: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,7 +145,8 @@ pub fn import_existing_backups_for_game(
         });
     }
 
-    let candidate_dirs = find_backup_game_dirs(&backup_root, game_name);
+    let year = get_game_year(game_id);
+    let candidate_dirs = find_backup_game_dirs(&backup_root, game_name, year.as_deref());
     if candidate_dirs.is_empty() {
         return Ok(BackupImportResult {
             backups_added: 0,
@@ -220,6 +229,7 @@ pub fn import_existing_backups_for_game(
         )?;
 
         if let Some(path) = &save_path {
+            let path = tokenise_save_path(game_id, path);
             conn.execute(
                 "UPDATE games SET save_path = ?1, save_path_checked = 1 WHERE id = ?2",
                 params![path, game_id],
@@ -236,11 +246,15 @@ pub fn import_existing_backups_for_game(
     })
 }
 
-fn find_backup_game_dirs(backup_root: &Path, game_name: &str) -> Vec<PathBuf> {
+fn find_backup_game_dirs(backup_root: &Path, game_name: &str, year: Option<&str>) -> Vec<PathBuf> {
     let base = sanitize_folder_name(game_name).to_lowercase();
     if base.is_empty() {
         return Vec::new();
     }
+    let expected_parens = year
+        .map(|y| y.trim())
+        .filter(|y| !y.is_empty())
+        .map(|y| format!("{} ({})", base, y.to_lowercase()));
     let mut out = Vec::new();
     if let Ok(entries) = fs::read_dir(backup_root) {
         for entry in entries.flatten() {
@@ -249,7 +263,12 @@ fn find_backup_game_dirs(backup_root: &Path, game_name: &str) -> Vec<PathBuf> {
                 continue;
             }
             let name = entry.file_name().to_string_lossy().to_lowercase();
-            if name == base || name.starts_with(&format!("{}-", base)) {
+            let matches_default = name == base || name.starts_with(&format!("{}-", base));
+            let matches_parens = expected_parens
+                .as_ref()
+                .map(|expected| name == *expected)
+                .unwrap_or(false);
+            if matches_default || matches_parens {
                 out.push(path);
             }
         }
@@ -529,9 +548,9 @@ fn get_setting_i32(key: &str, default: i32) -> i32 {
         .unwrap_or(default)
 }
 
-fn get_game_save_path(game_id: &str) -> Option<String> {
+fn get_game_exe_path(game_id: &str) -> Option<String> {
     with_db(|conn| {
-        let mut stmt = conn.prepare("SELECT save_path FROM games WHERE id = ?1")?;
+        let mut stmt = conn.prepare("SELECT exe_path FROM games WHERE id = ?1")?;
         let value: Option<String> = stmt
             .query_row(params![game_id], |row| row.get(0))
             .unwrap_or(None);
@@ -549,7 +568,78 @@ fn get_game_save_path(game_id: &str) -> Option<String> {
     })
 }
 
+fn resolve_save_path(game_id: &str, raw: &str) -> Result<String, String> {
+    if !raw.contains(SAVE_PATH_GAME_TOKEN) {
+        return Ok(raw.to_string());
+    }
+    let exe_path = get_game_exe_path(game_id)
+        .ok_or_else(|| "Не удалось подставить {PATHTOGAME}: путь к игре не найден".to_string())?;
+    let exe_dir = Path::new(&exe_path).parent().ok_or_else(|| {
+        "Не удалось подставить {PATHTOGAME}: у пути к игре нет родительской папки".to_string()
+    })?;
+    Ok(raw.replace(SAVE_PATH_GAME_TOKEN, &exe_dir.to_string_lossy()))
+}
+
+fn tokenise_save_path(game_id: &str, save_path: &str) -> String {
+    if save_path.contains(SAVE_PATH_GAME_TOKEN) {
+        return save_path.to_string();
+    }
+
+    let save_path_pb = PathBuf::from(save_path);
+    if !save_path_pb.is_absolute() || !save_path_pb.exists() {
+        return save_path.to_string();
+    }
+
+    let Some(exe_path) = get_game_exe_path(game_id) else {
+        return save_path.to_string();
+    };
+    let Some(game_dir) = Path::new(&exe_path).parent() else {
+        return save_path.to_string();
+    };
+
+    let Ok(game_dir) = fs::canonicalize(game_dir) else {
+        return save_path.to_string();
+    };
+    let Ok(save_path_pb) = fs::canonicalize(save_path_pb) else {
+        return save_path.to_string();
+    };
+
+    let Ok(relative) = save_path_pb.strip_prefix(&game_dir) else {
+        return save_path.to_string();
+    };
+
+    if relative.as_os_str().is_empty() {
+        return SAVE_PATH_GAME_TOKEN.to_string();
+    }
+
+    let mut out = String::from(SAVE_PATH_GAME_TOKEN);
+    out.push(std::path::MAIN_SEPARATOR);
+    out.push_str(&relative.to_string_lossy());
+    out
+}
+
+fn get_game_save_path(game_id: &str) -> Result<Option<String>, String> {
+    let raw: Option<String> = with_db(|conn| {
+        let mut stmt = conn.prepare("SELECT save_path FROM games WHERE id = ?1")?;
+        let value: Option<String> = stmt
+            .query_row(params![game_id], |row| row.get(0))
+            .unwrap_or(None);
+        Ok(value)
+    })
+    .map_err(|e| e.to_string())?;
+
+    let Some(path) = raw else {
+        return Ok(None);
+    };
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(resolve_save_path(game_id, trimmed)?))
+}
+
 fn set_game_save_path(game_id: &str, save_path: &str) -> Result<(), String> {
+    let save_path = tokenise_save_path(game_id, save_path);
     with_db(|conn| {
         conn.execute(
             "UPDATE games SET save_path = ?1 WHERE id = ?2",
@@ -599,7 +689,7 @@ pub fn set_ludusavi_path(_path: String) -> Result<(), String> {
 
 #[tauri::command]
 pub fn set_backup_directory(path: String) -> Result<(), String> {
-    fs::create_dir_all(&path).map_err(|e| format!("Failed to create directory: {}", e))?;
+    fs::create_dir_all(&path).map_err(|e| format!("Не удалось создать папку: {}", e))?;
 
     with_db(|conn| {
         conn.execute(
@@ -617,6 +707,110 @@ pub fn get_backup_directory_setting() -> Result<String, String> {
 }
 
 #[tauri::command]
+pub fn refresh_sqoba_manifest() -> Result<(), String> {
+    crate::backup::sqoba_manifest::refresh_manifest_from_network()
+        .map_err(|e| format!("Не удалось обновить манифест SQOBA: {}", e))?;
+
+    // Reload the in-memory cache so subsequent calls don't re-read/parse the manifest.
+    let mut engine = BACKUP_ENGINE.lock().map_err(|e| e.to_string())?;
+    engine
+        .reload_manifest()
+        .map_err(|e| format!("Не удалось перезагрузить манифест: {}", e))?;
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn find_game_save_paths(
+    game_name: String,
+    game_id: Option<String>,
+) -> Result<SavePathLookup, String> {
+    let mut engine = BACKUP_ENGINE.lock().map_err(|e| e.to_string())?;
+
+    engine
+        .load_manifest()
+        .map_err(|e| format!("Не удалось загрузить манифест: {}", e))?;
+
+    let year = game_id.as_deref().and_then(get_game_year);
+    let name_with_year = year.map(|y| format!("{} ({})", game_name, y));
+
+    let mut last_err: Option<String> = None;
+    let save_override = match game_id.as_deref() {
+        Some(id) => match get_game_save_path(id) {
+            Ok(value) => value,
+            Err(e) => {
+                last_err = Some(e);
+                None
+            }
+        },
+        None => None,
+    };
+
+    let mut roots = match engine.discover_game_save_roots(&game_name, save_override.as_deref()) {
+        Ok(value) => value,
+        Err(e) => {
+            last_err = Some(e);
+            Vec::new()
+        }
+    };
+
+    if roots.is_empty() && save_override.is_some() {
+        roots = match engine.discover_game_save_roots(&game_name, None) {
+            Ok(value) => value,
+            Err(e) => {
+                last_err = Some(e);
+                Vec::new()
+            }
+        };
+    }
+
+    if roots.is_empty() {
+        if let Some(alt) = &name_with_year {
+            roots = match engine.discover_game_save_roots(alt, None) {
+                Ok(value) => value,
+                Err(e) => {
+                    last_err = Some(e);
+                    Vec::new()
+                }
+            };
+        }
+    }
+
+    if roots.is_empty() {
+        let _ = last_err;
+        return Ok(SavePathLookup {
+            save_path: None,
+            candidates: Vec::new(),
+        });
+    }
+
+    let mut candidates = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for root in &roots {
+        let value = root.path.to_string_lossy().to_string();
+        if seen.insert(value.clone()) {
+            candidates.push(value);
+        }
+    }
+
+    let first_root = candidates.first().cloned();
+    let mut save_path = save_override.clone().or_else(|| first_root.clone());
+
+    if save_override.is_none() && candidates.len() == 1 {
+        if let (Some(game_id), Some(candidate)) = (game_id.as_deref(), first_root.clone()) {
+            if set_game_save_path(game_id, &candidate).is_ok() {
+                save_path = Some(candidate);
+            }
+        }
+    }
+
+    Ok(SavePathLookup {
+        save_path,
+        candidates,
+    })
+}
+
+#[tauri::command]
 pub fn find_game_saves(
     game_name: String,
     game_id: Option<String>,
@@ -626,12 +820,54 @@ pub fn find_game_saves(
     // Ensure manifest is loaded
     engine
         .load_manifest()
-        .map_err(|e| format!("Failed to load manifest: {}", e))?;
+        .map_err(|e| format!("Не удалось загрузить манифест: {}", e))?;
 
-    let save_override = game_id.as_deref().and_then(get_game_save_path);
+    let year = game_id.as_deref().and_then(get_game_year);
+    let name_with_year = year.map(|y| format!("{} ({})", game_name, y));
 
-    match engine.discover_game_saves(&game_name, save_override.as_deref()) {
-        Ok(Some(discovery)) => {
+    let mut last_err: Option<String> = None;
+    let save_override = match game_id.as_deref() {
+        Some(id) => match get_game_save_path(id) {
+            Ok(value) => value,
+            Err(e) => {
+                last_err = Some(e);
+                None
+            }
+        },
+        None => None,
+    };
+    let mut discovery = match engine.discover_game_saves(&game_name, save_override.as_deref()) {
+        Ok(value) => value,
+        Err(e) => {
+            last_err = Some(e);
+            None
+        }
+    };
+
+    if discovery.is_none() && save_override.is_some() {
+        discovery = match engine.discover_game_saves(&game_name, None) {
+            Ok(value) => value,
+            Err(e) => {
+                last_err = Some(e);
+                None
+            }
+        };
+    }
+
+    if discovery.is_none() {
+        if let Some(alt) = &name_with_year {
+            discovery = match engine.discover_game_saves(alt, None) {
+                Ok(value) => value,
+                Err(e) => {
+                    last_err = Some(e);
+                    None
+                }
+            };
+        }
+    }
+
+    match discovery {
+        Some(discovery) => {
             let file_strings: Vec<String> = discovery
                 .files
                 .iter()
@@ -659,8 +895,12 @@ pub fn find_game_saves(
                 files: file_strings,
             }))
         }
-        Ok(None) => Ok(None),
-        Err(e) => Err(e),
+        None => {
+            // If we couldn't resolve an override or any heuristic, just report "not found".
+            // This keeps the UI behaviour consistent and avoids surfacing low-level errors.
+            let _ = last_err;
+            Ok(None)
+        }
     }
 }
 
@@ -692,8 +932,8 @@ fn create_backup_inner(
     // Ensure manifest
     engine
         .load_manifest()
-        .map_err(|e| format!("Failed to load manifest: {}", e))?;
-    let save_path_override = get_game_save_path(&game_id);
+        .map_err(|e| format!("Не удалось загрузить манифест: {}", e))?;
+    let save_path_override = get_game_save_path(&game_id).unwrap_or(None);
 
     let backup_root = get_backup_directory();
     let threads = get_disk_threads(&backup_root);
@@ -706,7 +946,7 @@ fn create_backup_inner(
 
     let game_backup_dir = backup_root.join(game_folder);
     fs::create_dir_all(&game_backup_dir)
-        .map_err(|e| format!("Failed to create backup directory: {}", e))?;
+        .map_err(|e| format!("Не удалось создать папку для бэкапов: {}", e))?;
 
     // Create timestamped backup folder
     let timestamp = Local::now().format("%H%M%S_%d%m%Y").to_string();
@@ -733,7 +973,7 @@ fn create_backup_inner(
             BackupProgressEvent {
                 game_id: game_id.clone(),
                 stage: "scan".to_string(),
-                message: "Scanning backup files".to_string(),
+                message: "Сканирование файлов".to_string(),
                 done: 0,
                 total: 0,
             },
@@ -757,14 +997,49 @@ fn create_backup_inner(
         }) as Arc<dyn Fn(BackupProgress) + Send + Sync>
     });
 
-    let backup_size = engine.backup_game_with_options_and_progress(
-        &game_name,
-        &backup_path,
-        threads,
-        backup_options,
-        save_path_override.as_deref(),
-        progress,
-    )?;
+    let year = get_game_year(&game_id);
+    let name_with_year = year.map(|y| format!("{} ({})", game_name, y));
+
+    let mut attempts: Vec<(&str, Option<&str>)> = Vec::new();
+    attempts.push((&game_name, save_path_override.as_deref()));
+    if save_path_override.is_some() {
+        attempts.push((&game_name, None));
+    }
+    if let Some(alt) = name_with_year.as_deref() {
+        attempts.push((alt, None));
+    }
+
+    let mut last_err: Option<String> = None;
+    let mut backup_size: Option<u64> = None;
+    for (name, override_path) in attempts {
+        match engine.backup_game_with_options_and_progress(
+            name,
+            &backup_path,
+            threads,
+            backup_options,
+            override_path,
+            progress.clone(),
+        ) {
+            Ok(size) => {
+                backup_size = Some(size);
+                break;
+            }
+            Err(e) => {
+                last_err = Some(e);
+                if backup_path.exists() {
+                    if backup_path.is_dir() {
+                        let _ = fs::remove_dir_all(&backup_path);
+                    } else {
+                        let _ = fs::remove_file(&backup_path);
+                    }
+                }
+            }
+        }
+    }
+
+    let Some(backup_size) = backup_size else {
+        return Err(last_err.unwrap_or_else(|| "Не удалось создать бэкап".to_string()));
+    };
 
     if let Some(app) = &app {
         let _ = app.emit(
@@ -772,7 +1047,7 @@ fn create_backup_inner(
             BackupProgressEvent {
                 game_id: game_id.clone(),
                 stage: "done".to_string(),
-                message: "Backup completed".to_string(),
+                message: "Бэкап создан".to_string(),
                 done: 0,
                 total: 0,
             },
@@ -971,7 +1246,7 @@ pub async fn restore_backup(app: tauri::AppHandle, backup_id: String) -> Result<
             BackupProgressEvent {
                 game_id: game_id.clone(),
                 stage: "done".to_string(),
-                message: "Restore completed".to_string(),
+                message: "Восстановление завершено".to_string(),
                 done: 0,
                 total: 0,
             },
@@ -1009,10 +1284,10 @@ pub fn delete_backup(backup_id: String) -> Result<(), String> {
     if backup_path.exists() {
         if backup_path.is_dir() {
             fs::remove_dir_all(backup_path)
-                .map_err(|e| format!("Failed to delete backup directory: {}", e))?;
+                .map_err(|e| format!("Не удалось удалить папку бэкапа: {}", e))?;
         } else {
             fs::remove_file(backup_path)
-                .map_err(|e| format!("Failed to delete backup file: {}", e))?;
+                .map_err(|e| format!("Не удалось удалить файл бэкапа: {}", e))?;
         }
     }
 

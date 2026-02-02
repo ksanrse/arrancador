@@ -127,6 +127,11 @@ export interface BackupInfo {
   files: string[];
 }
 
+export interface SavePathLookup {
+  save_path: string | null;
+  candidates: string[];
+}
+
 export interface RestoreCheck {
   should_restore: boolean;
   backup_id: string | null;

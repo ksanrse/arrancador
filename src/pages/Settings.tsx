@@ -8,9 +8,11 @@ import {
   Monitor,
   Moon,
   Power,
+  RefreshCw,
   Shield,
   Sun,
 } from "lucide-react";
+import { useState } from "react";
 import { useTheme } from "@/components/theme-provider";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,7 +44,25 @@ export default function Settings() {
     toggleAutoStart,
     saveSettings,
     selectBackupDirectory,
+    refreshSqobaManifest,
   } = useSettingsState();
+  const [manifestRefreshing, setManifestRefreshing] = useState(false);
+  const [manifestStatus, setManifestStatus] = useState<string | null>(null);
+
+  const handleRefreshManifest = async () => {
+    if (manifestRefreshing) return;
+    setManifestRefreshing(true);
+    setManifestStatus(null);
+    try {
+      await refreshSqobaManifest();
+      setManifestStatus("Манифест обновлён");
+    } catch (e) {
+      console.error("Failed to refresh SQOBA manifest:", e);
+      setManifestStatus("Не удалось обновить манифест");
+    } finally {
+      setManifestRefreshing(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -164,6 +184,36 @@ export default function Settings() {
               </p>
             </div>
 
+            <div className="rounded-md border border-dashed p-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium">Манифест SQOBA</div>
+                  <div className="text-xs text-muted-foreground">
+                    Нужен для автопоиска сохранений (Ludusavi/PCGamingWiki).
+                  </div>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRefreshManifest}
+                  disabled={manifestRefreshing}
+                  className="gap-2"
+                >
+                  {manifestRefreshing ? (
+                    <Loader2 className="w-3 h-3 animate-spin" />
+                  ) : (
+                    <RefreshCw className="w-3 h-3" />
+                  )}
+                  Обновить
+                </Button>
+              </div>
+              {manifestStatus ? (
+                <div className="text-xs text-muted-foreground mt-2">
+                  {manifestStatus}
+                </div>
+              ) : null}
+            </div>
+
             <div>
               <label className="text-sm font-medium mb-2 block">
                 Папка для бэкапов
@@ -254,10 +304,14 @@ export default function Settings() {
             >
               <div>
                 <span id="setting-compression" className="text-sm font-medium">
-                  {"\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u0441\u0436\u0430\u0442\u0438\u0435"}
+                  {
+                    "\u0412\u043a\u043b\u044e\u0447\u0438\u0442\u044c \u0441\u0436\u0430\u0442\u0438\u0435"
+                  }
                 </span>
                 <span className="text-xs text-muted-foreground block">
-                  {"\u0421\u0436\u0430\u0442\u044b\u0435 \u0431\u044d\u043a\u0430\u043f\u044b \u0437\u0430\u043d\u0438\u043c\u0430\u044e\u0442 \u043c\u0435\u043d\u044c\u0448\u0435 \u043c\u0435\u0441\u0442\u0430 \u0438 \u043b\u0443\u0447\u0448\u0435 \u0445\u0440\u0430\u043d\u044f\u0442 \u0438\u0441\u0442\u043e\u0440\u0438\u044e."}
+                  {
+                    "\u0421\u0436\u0430\u0442\u044b\u0435 \u0431\u044d\u043a\u0430\u043f\u044b \u0437\u0430\u043d\u0438\u043c\u0430\u044e\u0442 \u043c\u0435\u043d\u044c\u0448\u0435 \u043c\u0435\u0441\u0442\u0430 \u0438 \u043b\u0443\u0447\u0448\u0435 \u0445\u0440\u0430\u043d\u044f\u0442 \u0438\u0441\u0442\u043e\u0440\u0438\u044e."
+                  }
                 </span>
               </div>
               <Switch
@@ -268,7 +322,9 @@ export default function Settings() {
               />
             </div>
 
-            <div className={`space-y-3 ${compressionEnabled ? "" : "opacity-50"}`}>
+            <div
+              className={`space-y-3 ${compressionEnabled ? "" : "opacity-50"}`}
+            >
               <div className="flex items-center gap-3">
                 <label className="text-xs text-muted-foreground">
                   {"\u0423\u0440\u043e\u0432\u0435\u043d\u044c"}
@@ -302,7 +358,9 @@ export default function Settings() {
                 disabled={!compressionEnabled}
               />
               <p className="text-xs text-muted-foreground">
-                {"\u041d\u0438\u0437\u043a\u0438\u0435 \u0443\u0440\u043e\u0432\u043d\u0438 \u2014 \u0431\u044b\u0441\u0442\u0440\u0435\u0435, \u0432\u044b\u0441\u043e\u043a\u0438\u0435 \u2014 \u043a\u043e\u043c\u043f\u0430\u043a\u0442\u043d\u0435\u0435. \u0420\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0430\u0446\u0438\u044f: 40\u201370 \u0434\u043b\u044f \u0431\u0430\u043b\u0430\u043d\u0441\u0430."}
+                {
+                  "\u041d\u0438\u0437\u043a\u0438\u0435 \u0443\u0440\u043e\u0432\u043d\u0438 \u2014 \u0431\u044b\u0441\u0442\u0440\u0435\u0435, \u0432\u044b\u0441\u043e\u043a\u0438\u0435 \u2014 \u043a\u043e\u043c\u043f\u0430\u043a\u0442\u043d\u0435\u0435. \u0420\u0435\u043a\u043e\u043c\u0435\u043d\u0434\u0430\u0446\u0438\u044f: 40\u201370 \u0434\u043b\u044f \u0431\u0430\u043b\u0430\u043d\u0441\u0430."
+                }
               </p>
             </div>
 
@@ -313,7 +371,9 @@ export default function Settings() {
               }
             >
               <span id="setting-skip-compression" className="text-sm">
-                {"\u041f\u0440\u043e\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u0441\u0436\u0430\u0442\u0438\u0435 \u043e\u0434\u0438\u043d \u0440\u0430\u0437"}
+                {
+                  "\u041f\u0440\u043e\u043f\u0443\u0441\u0442\u0438\u0442\u044c \u0441\u0436\u0430\u0442\u0438\u0435 \u043e\u0434\u0438\u043d \u0440\u0430\u0437"
+                }
               </span>
               <Switch
                 checked={skipCompressionOnce}
@@ -324,7 +384,9 @@ export default function Settings() {
               />
             </div>
             <p className="text-xs text-muted-foreground">
-              {"\u0421\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u0431\u044d\u043a\u0430\u043f \u0431\u0443\u0434\u0435\u0442 \u0441\u043e\u0437\u0434\u0430\u043d \u0431\u0435\u0437 \u0441\u0436\u0430\u0442\u0438\u044f, \u0430 \u0437\u0430\u0442\u0435\u043c \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430 \u0432\u0435\u0440\u043d\u0435\u0442\u0441\u044f \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438."}
+              {
+                "\u0421\u043b\u0435\u0434\u0443\u044e\u0449\u0438\u0439 \u0431\u044d\u043a\u0430\u043f \u0431\u0443\u0434\u0435\u0442 \u0441\u043e\u0437\u0434\u0430\u043d \u0431\u0435\u0437 \u0441\u0436\u0430\u0442\u0438\u044f, \u0430 \u0437\u0430\u0442\u0435\u043c \u043d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0430 \u0432\u0435\u0440\u043d\u0435\u0442\u0441\u044f \u0430\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u0438."
+              }
             </p>
           </div>
         </section>

@@ -7,6 +7,7 @@ import {
   Clock,
   Download,
   ExternalLink,
+  File as FileIcon,
   FolderOpen,
   Gamepad2,
   Globe,
@@ -32,9 +33,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Switch } from "@/components/ui/switch";
+import { useGameStatus } from "@/hooks/useGameStatus";
 import { backupApi, gamesApi, metadataApi } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { useGameStatus } from "@/hooks/useGameStatus";
 import { useGamesActions, useGamesState } from "@/store/GamesContext";
 import type { Backup, Game, RawgGame, RestoreCheck } from "@/types";
 
@@ -121,6 +122,7 @@ export default function GameDetail() {
 
   const latestBackup = backups[0];
   const olderBackups = backups.slice(1);
+  const gamePathToken = "{PATHTOGAME}";
   const savePathValue = savePathDraft.trim();
   const savedPath = game?.save_path ?? "";
   const savePathDirty = savePathValue !== savedPath;
@@ -174,12 +176,12 @@ export default function GameDetail() {
   const isMissing = !isInstalled && !checkingInstalled;
   const playState = isMissing ? "missing" : isRunning ? "running" : "ready";
   const playLabel = isMissing
-    ? "\u041d\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430"
+    ? "Не установлена"
     : launching
-      ? "\u0417\u0430\u043f\u0443\u0441\u043a\u0430\u0435\u0442\u0441\u044f"
+      ? "Запускается"
       : isRunning
-        ? "\u0417\u0430\u043f\u0443\u0449\u0435\u043d\u0430"
-        : "\u0418\u0433\u0440\u0430\u0442\u044c";
+        ? "Запущена"
+        : "Играть";
 
   useEffect(() => {
     const found = games.find((g) => g.id === id);
@@ -217,27 +219,27 @@ export default function GameDetail() {
         "backup:progress",
         (event) => {
           const payload = event.payload;
-        if (payload.game_id !== game.id) return;
-        const { stage, message, done, total } = payload;
-        if (stage === "done") {
-          setBackupProgress({ active: false, stage, message, done, total });
-        } else {
-          setBackupProgress({ active: true, stage, message, done, total });
-        }
-        }
+          if (payload.game_id !== game.id) return;
+          const { stage, message, done, total } = payload;
+          if (stage === "done") {
+            setBackupProgress({ active: false, stage, message, done, total });
+          } else {
+            setBackupProgress({ active: true, stage, message, done, total });
+          }
+        },
       );
       unlistenRestore = await listen<BackupProgressPayload>(
         "restore:progress",
         (event) => {
           const payload = event.payload;
-        if (payload.game_id !== game.id) return;
-        const { stage, message, done, total } = payload;
-        if (stage === "done") {
-          setBackupProgress({ active: false, stage, message, done, total });
-        } else {
-          setBackupProgress({ active: true, stage, message, done, total });
-        }
-        }
+          if (payload.game_id !== game.id) return;
+          const { stage, message, done, total } = payload;
+          if (stage === "done") {
+            setBackupProgress({ active: false, stage, message, done, total });
+          } else {
+            setBackupProgress({ active: true, stage, message, done, total });
+          }
+        },
       );
     };
     setup();
@@ -340,7 +342,7 @@ export default function GameDetail() {
       })
       .catch((e) => {
         console.error("Backup failed:", e);
-        alert("Backup failed: " + (e as Error).message);
+        alert("Ошибка бэкапа: " + (e as Error).message);
       })
       .finally(() => {
         setCreatingBackup(false);
@@ -365,7 +367,7 @@ export default function GameDetail() {
       await refreshGames();
     } catch (e) {
       console.error("Restore failed:", e);
-      alert("Restore failed: " + (e as Error).message);
+      alert("Ошибка восстановления: " + (e as Error).message);
     } finally {
       setRestoring(false);
     }
@@ -463,7 +465,7 @@ export default function GameDetail() {
       alert("Бэкап успешно восстановлен!");
     } catch (e) {
       console.error("Restore failed:", e);
-      alert("Restore failed: " + (e as Error).message);
+      alert("Ошибка восстановления: " + (e as Error).message);
     }
   };
 
@@ -486,8 +488,7 @@ export default function GameDetail() {
     const selected = await open({
       directory: true,
       multiple: false,
-      title:
-        "\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043f\u0430\u043f\u043a\u0443 \u0441 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f\u043c\u0438",
+      title: "Выбрать папку с сохранениями",
     });
 
     if (selected) {
@@ -498,10 +499,40 @@ export default function GameDetail() {
     }
   };
 
+  const handleSelectSaveFile = async () => {
+    const selected = await open({
+      directory: false,
+      multiple: false,
+      title: "Выбрать файл сохранения",
+    });
+
+    if (selected) {
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      if (path) {
+        setSavePathDraft(path);
+      }
+    }
+  };
+
+  const resolveSavePathTemplate = (path: string) => {
+    if (!path.includes("{PATHTOGAME}")) return path;
+    const exePath = game?.exe_path;
+    if (!exePath) return path;
+    const lastSlash = Math.max(
+      exePath.lastIndexOf("\\"),
+      exePath.lastIndexOf("/"),
+    );
+    if (lastSlash <= 0) {
+      return path.replace(/{PATHTOGAME}/g, exePath);
+    }
+    const base = exePath.slice(0, lastSlash);
+    return path.replace(/{PATHTOGAME}/g, base);
+  };
+
   const handleOpenSavePath = async () => {
     if (!savePathValue) return;
     try {
-      await openPath(savePathValue);
+      await openPath(resolveSavePathTemplate(savePathValue));
     } catch (e) {
       console.error("Failed to open save path:", e);
     }
@@ -511,30 +542,66 @@ export default function GameDetail() {
     if (!game) return;
     setLocatingSavePath(true);
     try {
-      const info = await backupApi.findGameSaves(game.name, game.id);
-      if (info?.save_path) {
+      const info = await backupApi.findGameSavePaths(game.name, game.id);
+      if (info.save_path) {
         setSavePathDraft(info.save_path);
+        if (info.candidates.length > 1) {
+          notify({
+            tone: "info",
+            title: "Найдено несколько вариантов",
+            description:
+              "Проверьте, что выбранный путь действительно содержит сохранения.",
+          });
+        }
       } else {
         notify({
           tone: "warning",
-          title:
-            "\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f \u043d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u044b",
+          title: "Сохранения не найдены",
           description:
-            "\u0423\u043a\u0430\u0436\u0438\u0442\u0435 \u043f\u0443\u0442\u044c \u0432\u0440\u0443\u0447\u043d\u0443\u044e, \u0447\u0442\u043e\u0431\u044b \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f \u043f\u043e\u043f\u0430\u0434\u0430\u043b\u0438 \u0432 \u0431\u044d\u043a\u0430\u043f\u044b.",
+            "Укажите путь вручную, чтобы сохранения попадали в бэкапы.",
         });
       }
     } catch (e) {
       console.error("Failed to locate saves:", e);
       notify({
         tone: "error",
-        title:
-          "\u041e\u0448\u0438\u0431\u043a\u0430 \u043f\u043e\u0438\u0441\u043a\u0430 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0439",
-        description:
-          "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u043f\u0440\u043e\u0432\u0435\u0440\u0438\u0442\u044c \u043f\u0443\u0442\u044c \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0439.",
+        title: "Ошибка поиска сохранений",
+        description: "Не удалось проверить путь сохранений.",
       });
     } finally {
       setLocatingSavePath(false);
     }
+  };
+
+  const handleInsertGamePathToken = () => {
+    const current = savePathDraft.trim();
+    if (current.startsWith(gamePathToken)) return;
+    const needsSeparator =
+      current.length > 0 &&
+      !current.startsWith("\\") &&
+      !current.startsWith("/");
+    const next = `${gamePathToken}${needsSeparator ? "\\" : ""}${current}`;
+    setSavePathDraft(next);
+  };
+
+  const renderSavePathPreview = () => {
+    if (!savePathValue.includes(gamePathToken)) return null;
+    const parts = savePathValue.split(gamePathToken);
+    return (
+      <div className="text-[11px] text-muted-foreground">
+        {"Путь: "}
+        {parts.map((part, index) => (
+          <span key={`${index}-${part}`}>
+            {part}
+            {index < parts.length - 1 && (
+              <span className="mx-1 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-1 py-0.5 font-mono text-[10px] text-emerald-200">
+                {gamePathToken}
+              </span>
+            )}
+          </span>
+        ))}
+      </div>
+    );
   };
 
   const handleSaveSavePath = async () => {
@@ -700,7 +767,7 @@ export default function GameDetail() {
             size="icon"
             onClick={() => setShowGameSettings(true)}
             className="bg-background/60 backdrop-blur-md border border-white/10"
-            title="\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u0438\u0433\u0440\u044b"
+            title="Настройки игры"
           >
             <Settings className="w-4 h-4" />
           </Button>
@@ -768,7 +835,7 @@ export default function GameDetail() {
             {isMissing && (
               <div className="max-w-[280px] text-xs text-muted-foreground text-right">
                 {
-                  "\u0418\u0433\u0440\u0430 \u043d\u0435 \u0443\u0441\u0442\u0430\u043d\u043e\u0432\u043b\u0435\u043d\u0430, \u043d\u043e \u043a\u0430\u0440\u0442\u043e\u0447\u043a\u0430 \u043e\u0441\u0442\u0430\u0451\u0442\u0441\u044f \u0432 \u0431\u0438\u0431\u043b\u0438\u043e\u0442\u0435\u043a\u0435 \u2014 \u043a\u0430\u043a IMDb \u0434\u043b\u044f \u0441\u0432\u043e\u0438\u0445 \u0438\u0433\u0440. \u041c\u043e\u0436\u043d\u043e \u0441\u043d\u043e\u0432\u0430 \u0441\u043a\u0430\u0447\u0430\u0442\u044c, \u0441\u043c\u043e\u0442\u0440\u0435\u0442\u044c \u0441\u0442\u0430\u0442\u0438\u0441\u0442\u0438\u043a\u0443 \u0438 \u0432\u0435\u0440\u043d\u0443\u0442\u044c\u0441\u044f \u043a \u0431\u044d\u043a\u0430\u043f\u0430\u043c."
+                  "Игра не установлена, но карточка остаётся в библиотеке — как IMDb для своих игр. Можно снова скачать, смотреть статистику и вернуться к бэкапам."
                 }
               </div>
             )}
@@ -785,7 +852,7 @@ export default function GameDetail() {
               setRatingDraft(userRating ?? 4);
               setShowRatingModal(true);
             }}
-            aria-label={"\u041e\u0446\u0435\u043d\u043a\u0430"}
+            aria-label={"Оценка"}
           >
             <div
               className="absolute inset-0 rounded-2xl opacity-70 pointer-events-none"
@@ -798,7 +865,7 @@ export default function GameDetail() {
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <div className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
-                    {"\u041e\u0446\u0435\u043d\u043a\u0430"}
+                    {"Оценка"}
                   </div>
                   <div className="mt-2 flex items-baseline gap-2">
                     <span className="text-3xl font-semibold text-foreground">
@@ -828,7 +895,7 @@ export default function GameDetail() {
 
           <div className="rounded-2xl border border-border/60 bg-card/60 backdrop-blur-xl p-4 shadow-[0_12px_30px_rgba(8,12,24,0.35)]">
             <div className="text-sm text-muted-foreground mb-1">
-              {"\u0412\u0440\u0435\u043c\u044f \u0432 \u0438\u0433\u0440\u0435"}
+              {"Время в игре"}
             </div>
             <div className="text-2xl font-bold flex items-center gap-2">
               <Timer className="w-5 h-5" />
@@ -838,9 +905,7 @@ export default function GameDetail() {
 
           <div className="rounded-2xl border border-border/60 bg-card/60 backdrop-blur-xl p-4 shadow-[0_12px_30px_rgba(8,12,24,0.35)]">
             <div className="text-sm text-muted-foreground mb-1">
-              {
-                "\u041f\u043e\u0441\u043b\u0435\u0434\u043d\u0438\u0439 \u0437\u0430\u043f\u0443\u0441\u043a"
-              }
+              {"Последний запуск"}
             </div>
             {game.last_played ? (
               <div className="text-lg font-medium flex items-center gap-2">
@@ -849,9 +914,7 @@ export default function GameDetail() {
               </div>
             ) : (
               <div className="text-lg font-medium text-muted-foreground">
-                {
-                  "\u041d\u0435 \u0437\u0430\u043f\u0443\u0441\u043a\u0430\u043b\u043e\u0441\u044c"
-                }
+                {"Не запускалось"}
               </div>
             )}
           </div>
@@ -932,13 +995,12 @@ export default function GameDetail() {
                   >
                     <Download className="w-3 h-3" />
                   </Button>
-
                   <Button
                     size="icon"
                     className="h-8 w-8"
                     variant="outline"
                     onClick={() => setShowGameSettings(true)}
-                    title="\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u0438\u0433\u0440\u044b"
+                    title="Настройки игры"
                   >
                     <Settings className="w-3 h-3" />
                   </Button>{" "}
@@ -947,7 +1009,7 @@ export default function GameDetail() {
               <div className="rounded-xl border border-border/60 bg-secondary/40 p-3 mb-3 space-y-2">
                 <div className="flex items-center justify-between">
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {"\u0421\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f"}
+                    {"Сохранения"}
                   </div>
                   <span
                     className={cn(
@@ -957,22 +1019,24 @@ export default function GameDetail() {
                         : "text-muted-foreground",
                     )}
                   >
-                    {game.save_path
-                      ? "\u041d\u0430\u0441\u0442\u0440\u043e\u0435\u043d\u043e"
-                      : "\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e"}
+                    {game.save_path ? "Настроено" : "Не найдено"}
                   </span>
                 </div>
                 <div className="text-xs text-muted-foreground truncate">
                   {game.save_path
                     ? game.save_path
-                    : "\u041f\u0443\u0442\u044c \u043a \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f\u043c \u043d\u0435 \u0443\u043a\u0430\u0437\u0430\u043d"}
+                    : "Путь к сохранениям не указан"}
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span>{"\u0410\u0432\u0442\u043e\u0431\u044d\u043a\u0430\u043f"}</span>
-                  <span className={game.backup_enabled ? "text-emerald-400" : "text-muted-foreground"}>
-                    {game.backup_enabled
-                      ? "\u0412\u043a\u043b\u044e\u0447\u0435\u043d"
-                      : "\u0412\u044b\u043a\u043b\u044e\u0447\u0435\u043d"}
+                  <span>{"Автобэкап"}</span>
+                  <span
+                    className={
+                      game.backup_enabled
+                        ? "text-emerald-400"
+                        : "text-muted-foreground"
+                    }
+                  >
+                    {game.backup_enabled ? "Включен" : "Выключен"}
                   </span>
                 </div>
                 <Button
@@ -982,7 +1046,7 @@ export default function GameDetail() {
                   onClick={() => setShowGameSettings(true)}
                 >
                   <Settings className="w-3 h-3" />
-                  {"\u041d\u0430\u0441\u0442\u0440\u043e\u0438\u0442\u044c"}
+                  {"Настроить"}
                 </Button>
               </div>
 
@@ -1022,7 +1086,7 @@ export default function GameDetail() {
                               {(latestBackup.backup_size / 1024 / 1024).toFixed(
                                 1,
                               )}{" "}
-                              MB
+                              МБ
                             </span>
                             {latestBackup.is_auto && (
                               <span className="bg-primary/10 text-primary px-1 rounded">
@@ -1075,7 +1139,7 @@ export default function GameDetail() {
                                         1024 /
                                         1024
                                       ).toFixed(1)}{" "}
-                                      MB
+                                      МБ
                                     </span>
                                     {backup.is_auto && (
                                       <span className="bg-primary/10 text-primary px-1 rounded">
@@ -1112,14 +1176,8 @@ export default function GameDetail() {
         <div className="bg-card/60 backdrop-blur-xl rounded-2xl p-5 border border-border/60 shadow-[0_18px_40px_rgba(8,12,24,0.35)] mt-8">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <div className="text-sm text-muted-foreground">
-                {"\u0417\u0430\u043c\u0435\u0442\u043a\u0430"}
-              </div>
-              <div className="text-lg font-semibold">
-                {
-                  "\u0412\u0430\u0448\u0438 \u0432\u043f\u0435\u0447\u0430\u0442\u043b\u0435\u043d\u0438\u044f"
-                }
-              </div>
+              <div className="text-sm text-muted-foreground">{"Заметка"}</div>
+              <div className="text-lg font-semibold">{"Ваши впечатления"}</div>
             </div>
             <Button
               onClick={() => void handleSaveUserRating()}
@@ -1128,17 +1186,15 @@ export default function GameDetail() {
               {savingUserRating ? (
                 <Loader2 className="w-4 h-4 animate-spin mr-2" />
               ) : null}
-              {"\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c"}
+              {"Сохранить"}
             </Button>
           </div>
 
           <div className="space-y-2">
-            <label className="text-sm text-muted-foreground">
-              {"\u0417\u0430\u043c\u0435\u0442\u043a\u0430"}
-            </label>
+            <label className="text-sm text-muted-foreground">{"Заметка"}</label>
             <textarea
               className="flex min-h-[80px] w-full rounded-xl border border-border/60 bg-background/20 px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/60 disabled:cursor-not-allowed disabled:opacity-50"
-              placeholder="\u041d\u0430\u043f\u0440\u0438\u043c\u0435\u0440: \u0447\u0442\u043e \u043f\u043e\u043d\u0440\u0430\u0432\u0438\u043b\u043e\u0441\u044c, \u0447\u0442\u043e \u043d\u0435 \u043f\u043e\u043d\u0440\u0430\u0432\u0438\u043b\u043e\u0441\u044c, \u0437\u0430\u043c\u0435\u0442\u043a\u0438 \u043f\u043e \u0441\u044e\u0436\u0435\u0442\u0443..."
+              placeholder="Например: что понравилось, что не понравилось, заметки по сюжету..."
               value={userNote}
               onChange={(e) => setUserNote(e.target.value)}
             />
@@ -1146,14 +1202,13 @@ export default function GameDetail() {
         </div>
       </div>
 
-
       {showGameSettings && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-card/90 backdrop-blur-xl rounded-2xl border border-border/60 w-full max-w-xl shadow-[0_30px_80px_rgba(8,12,24,0.55)] overflow-hidden">
             <div className="flex items-center justify-between p-5 border-b border-border/60">
               <div>
                 <div className="text-xs uppercase tracking-wider text-muted-foreground">
-                  {"\u041d\u0430\u0441\u0442\u0440\u043e\u0439\u043a\u0438 \u0438\u0433\u0440\u044b"}
+                  {"Настройки игры"}
                 </div>
                 <div className="text-lg font-semibold">{game.name}</div>
               </div>
@@ -1170,20 +1225,20 @@ export default function GameDetail() {
               <div className="p-5 space-y-6">
                 <div className="rounded-2xl border border-border/60 bg-secondary/30 p-4 space-y-3">
                   <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {"\u0411\u044d\u043a\u0430\u043f\u044b"}
+                    {"Бэкапы"}
                   </div>
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <div className="text-sm font-medium">
-                        {"\u0410\u0432\u0442\u043e\u0431\u044d\u043a\u0430\u043f"}
-                      </div>
+                      <div className="text-sm font-medium">{"Автобэкап"}</div>
                       <div className="text-xs text-muted-foreground">
-                        {"\u0410\u0432\u0442\u043e\u043c\u0430\u0442\u0438\u0447\u0435\u0441\u043a\u043e \u0441\u043e\u0437\u0434\u0430\u0432\u0430\u0442\u044c \u043a\u043e\u043f\u0438\u044e \u043f\u043e\u0441\u043b\u0435 \u0432\u044b\u0445\u043e\u0434\u0430 \u0438\u0437 \u0438\u0433\u0440\u044b"}
+                        {"Автоматическо создавать копию после выхода из игры"}
                       </div>
                     </div>
                     <Switch
                       checked={game.backup_enabled}
-                      onCheckedChange={(checked) => toggleBackupEnabled(checked)}
+                      onCheckedChange={(checked) =>
+                        toggleBackupEnabled(checked)
+                      }
                     />
                   </div>
                 </div>
@@ -1191,7 +1246,7 @@ export default function GameDetail() {
                 <div className="rounded-2xl border border-border/60 bg-secondary/30 p-4 space-y-3">
                   <div className="flex items-center justify-between">
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {"\u041f\u0443\u0442\u044c \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u0439"}
+                      {"Путь сохранений"}
                     </div>
                     <span
                       className={cn(
@@ -1201,35 +1256,59 @@ export default function GameDetail() {
                           : "text-muted-foreground",
                       )}
                     >
-                      {game.save_path
-                        ? "\u041d\u0430\u0441\u0442\u0440\u043e\u0435\u043d"
-                        : "\u041d\u0435 \u043d\u0430\u0439\u0434\u0435\u043d\u043e"}
+                      {game.save_path ? "Настроен" : "Не найдено"}
                     </span>
                   </div>
 
                   <Input
                     value={savePathDraft}
                     onChange={(event) => setSavePathDraft(event.target.value)}
-                    placeholder={
-                      "\u041f\u0443\u0442\u044c \u043a \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f\u043c"
-                    }
+                    placeholder={"Путь к сохранениям"}
                   />
+
+                  <div className="flex items-center justify-between gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleInsertGamePathToken}
+                      className="text-xs"
+                    >
+                      {"Вставить"}
+                      <span className="ml-2 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-0.5 font-mono text-[10px] text-emerald-200">
+                        {gamePathToken}
+                      </span>
+                    </Button>
+                    {savePathValue.includes(gamePathToken) && (
+                      <span className="text-[11px] text-muted-foreground">
+                        {"Можно использовать путь от папки игры"}
+                      </span>
+                    )}
+                  </div>
+                  {renderSavePathPreview()}
 
                   <div className="flex gap-2">
                     <Button
                       variant="outline"
                       size="icon"
                       onClick={handleSelectSavePath}
-                      title="\u0412\u044b\u0431\u0440\u0430\u0442\u044c \u043f\u0430\u043f\u043a\u0443"
+                      title="Выбрать папку"
                     >
                       <FolderOpen className="w-4 h-4" />
                     </Button>
                     <Button
                       variant="outline"
                       size="icon"
+                      onClick={handleSelectSaveFile}
+                      title="Выбрать файл"
+                    >
+                      <FileIcon className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="icon"
                       onClick={handleOpenSavePath}
                       disabled={!savePathValue}
-                      title="\u041e\u0442\u043a\u0440\u044b\u0442\u044c \u043f\u0430\u043f\u043a\u0443"
+                      title="Открыть папку"
                     >
                       <ExternalLink className="w-4 h-4" />
                     </Button>
@@ -1245,7 +1324,7 @@ export default function GameDetail() {
                       ) : (
                         <Search className="w-3 h-3" />
                       )}
-                      {"\u041d\u0430\u0439\u0442\u0438"}
+                      {"Найти"}
                     </Button>
                     <Button
                       size="sm"
@@ -1258,20 +1337,25 @@ export default function GameDetail() {
                       ) : (
                         <Save className="w-3 h-3" />
                       )}
-                      {"\u0421\u043e\u0445\u0440\u0430\u043d\u0438\u0442\u044c"}
+                      {"Сохранить"}
                     </Button>
                   </div>
 
                   <p className="text-xs text-muted-foreground">
-                    {"\u0415\u0441\u043b\u0438 \u043f\u0443\u0442\u044c \u043f\u0443\u0441\u0442\u043e\u0439, SQOBA \u043f\u043e\u043f\u044b\u0442\u0430\u0435\u0442\u0441\u044f \u043d\u0430\u0439\u0442\u0438 \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0438\u044f \u043f\u0440\u0438 \u0441\u043b\u0435\u0434\u0443\u044e\u0449\u0435\u043c \u0431\u044d\u043a\u0430\u043f\u0435."}
+                    {
+                      "Можно указать папку или конкретный файл сохранения. Если путь пустой, SQOBA попробует найти сохранения при следующем бэкапе. Можно использовать {PATHTOGAME} как папку игры для относительных путей."
+                    }
                   </p>
                 </div>
               </div>
             </ScrollArea>
 
             <div className="p-5 border-t border-border/60 flex justify-end">
-              <Button variant="ghost" onClick={() => setShowGameSettings(false)}>
-                {"\u0417\u0430\u043a\u0440\u044b\u0442\u044c"}
+              <Button
+                variant="ghost"
+                onClick={() => setShowGameSettings(false)}
+              >
+                {"Закрыть"}
               </Button>
             </div>
           </div>
@@ -1345,12 +1429,12 @@ export default function GameDetail() {
             <div className="min-w-0">
               <div className="text-sm font-medium">
                 {backupProgress.stage === "scan"
-                  ? "Preparing backup"
+                  ? "Подготовка бэкапа"
                   : backupProgress.stage === "copy"
-                    ? "Creating backup"
+                    ? "Создание бэкапа"
                     : backupProgress.stage === "restore"
-                      ? "Restoring backup"
-                      : "Processing"}
+                      ? "Восстановление бэкапа"
+                      : "Обработка"}
               </div>
               <div className="text-xs text-muted-foreground truncate">
                 {backupProgress.message}
@@ -1371,16 +1455,26 @@ export default function GameDetail() {
           <div className="bg-card rounded-xl border w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="flex items-center justify-between p-6 border-b">
               <h2 className="text-xl font-bold">Редактировать игру</h2>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => setShowEditDialog(false)}
-              >
-                <X className="w-5 h-5" />
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button onClick={handleSaveEdit} disabled={saving}>
+                  {saving ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                  ) : (
+                    <Save className="w-4 h-4 mr-2" />
+                  )}
+                  {"Сохранить"}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={() => setShowEditDialog(false)}
+                >
+                  <X className="w-5 h-5" />
+                </Button>
+              </div>
             </div>
             <ScrollArea className="flex-1">
-              <div className="p-6 space-y-6">
+              <div className="p-6 space-y-6 overflow-auto">
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Название</label>
                   <Input
@@ -1503,7 +1597,9 @@ export default function GameDetail() {
                 </Button>
               </div>
               <div className="flex items-center justify-between gap-3 text-sm text-muted-foreground mb-3">
-                <span id="rawg-rename-toggle">Use RAWG name</span>
+                <span id="rawg-rename-toggle">
+                  Использовать название из RAWG
+                </span>
                 <Switch
                   checked={renameFromMetadata}
                   onCheckedChange={setRenameFromMetadata}
@@ -1602,8 +1698,8 @@ export default function GameDetail() {
             {restoreInfo && (
               <div className="text-xs text-muted-foreground mb-4">
                 Текущий: {(restoreInfo.current_size / 1024 / 1024).toFixed(1)}{" "}
-                MB Бэкап: {(restoreInfo.backup_size / 1024 / 1024).toFixed(1)}{" "}
-                MB
+                МБ Бэкап: {(restoreInfo.backup_size / 1024 / 1024).toFixed(1)}{" "}
+                МБ
               </div>
             )}
             <div className="flex justify-end gap-2">

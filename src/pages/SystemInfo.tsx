@@ -573,7 +573,7 @@ export default function SystemInfoPage() {
                           {disk.isRemovable ? (
                             <span className="text-xs text-muted-foreground">
                               {
-                                "\u0421\u044a\u0451\u043c\u043d\u044b\u0439 \u043d\u043e\u0441\u0438\u0442\u0435\u043b\u044c"
+                                "\u0421\u044a\u0435\u043c\u043d\u044b\u0439 \u043d\u043e\u0441\u0438\u0442\u0435\u043b\u044c"
                               }
                             </span>
                           ) : null}
