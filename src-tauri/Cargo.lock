@@ -3,6 +3,43 @@
 version = 4
 
 [[package]]
+name = "Arrancador"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "dirs 5.0.1",
+ "flate2",
+ "glob",
+ "jwalk",
+ "lazy_static",
+ "num_cpus",
+ "rayon",
+ "regex",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sysinfo",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-autostart",
+ "tauri-plugin-dialog",
+ "tauri-plugin-opener",
+ "tauri-plugin-updater",
+ "tempfile",
+ "tokio",
+ "urlencoding",
+ "uuid",
+ "walkdir",
+ "which",
+ "windows 0.58.0",
+ "winreg 0.55.0",
+ "wmi",
+ "zip 7.2.0",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -77,43 +114,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1"
 dependencies = [
  "derive_arbitrary",
-]
-
-[[package]]
-name = "arrancador"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "dirs 5.0.1",
- "flate2",
- "glob",
- "jwalk",
- "lazy_static",
- "num_cpus",
- "rayon",
- "regex",
- "reqwest 0.12.28",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml",
- "sysinfo",
- "tauri",
- "tauri-build",
- "tauri-plugin-autostart",
- "tauri-plugin-dialog",
- "tauri-plugin-opener",
- "tauri-plugin-updater",
- "tempfile",
- "tokio",
- "urlencoding",
- "uuid",
- "walkdir",
- "which",
- "windows 0.58.0",
- "winreg 0.55.0",
- "wmi",
- "zip 7.2.0",
 ]
 
 [[package]]

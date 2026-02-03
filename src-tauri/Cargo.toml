@@ -1,8 +1,8 @@
 [package]
-name        = "arrancador"
+name        = "Arrancador"
 version     = "0.1.0"
 edition     = "2021"
-description = "A Tauri App"
+description = "Next-gen gaming library for community"
 authors     = ["you"]
 
 [lib]
