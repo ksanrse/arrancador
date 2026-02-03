@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "arrancador",
+  "productName": "Arrancador",
   "version": "0.1.0",
   "identifier": "com.arrancador.app",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "arrancador",
+        "title": "Arrancador",
         "width": 1200,
         "height": 800,
         "minWidth": 1200,

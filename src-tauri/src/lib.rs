@@ -76,7 +76,7 @@ fn setup_tray<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
 
     let mut tray_builder = TrayIconBuilder::new()
         .menu(&menu)
-        .tooltip("arrancador")
+        .tooltip("Arrancador")
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| {
             if event.id() == "tray_show" {

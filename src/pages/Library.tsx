@@ -1,20 +1,24 @@
-import { useState, useMemo } from "react";
-import { Link } from "react-router-dom";
-import { useGamesState } from "@/store/GamesContext";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
-  Search,
-  Grid3X3,
-  List,
-  Star,
-  Play,
   Clock,
   Gamepad2,
+  Grid3X3,
+  List,
+  Play,
+  Search,
+  Star,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import type { Game } from "@/types";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { GameCard } from "@/components/GameCard";
+import { RawgMetadataPrompt } from "@/components/RawgMetadataPrompt";
+import { useToast } from "@/components/ToastProvider";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { gamesApi } from "@/lib/api";
+import { cn } from "@/lib/utils";
+import { useGamesActions, useGamesState } from "@/store/GamesContext";
+import type { Game, NewGame } from "@/types";
 
 type ViewMode = "grid" | "list";
 type SortBy = "name" | "lastPlayed" | "dateAdded" | "playCount";
@@ -28,12 +32,179 @@ function formatPlaytime(seconds: number) {
   return `${minutes} мин`;
 }
 
+function fileNameFromPath(filePath: string) {
+  const normalized = filePath.replace(/\\/g, "/");
+  const name = normalized.split("/").pop();
+  return name || filePath;
+}
+
+function cleanNameFromFile(fileName: string) {
+  const base = fileName.replace(/\.exe$/i, "");
+  return base.replace(/[-_]/g, " ").replace(/\s+/g, " ").trim() || base;
+}
+
+function isSupportedDropPath(path: string) {
+  const lower = path.toLowerCase();
+  return lower.endsWith(".exe") || lower.endsWith(".lnk");
+}
+
+function hasSupportedDropPaths(paths: string[]) {
+  return paths.some(isSupportedDropPath);
+}
+
 export default function Library() {
   const { games, loading, favorites } = useGamesState();
+  const { addGames, refreshGames } = useGamesActions();
+  const { notify } = useToast();
   const [searchQuery, setSearchQuery] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [sortBy, setSortBy] = useState<SortBy>("name");
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+
+  const [dropActive, setDropActive] = useState(false);
+  const [metadataQueue, setMetadataQueue] = useState<Game[]>([]);
+  const dragHasSupportedRef = useRef(false);
+
+  const enqueueMetadata = useCallback((added: Game[]) => {
+    setMetadataQueue((prev) => {
+      if (added.length === 0) return prev;
+      const seen = new Set(prev.map((g) => g.id));
+      const next = [...prev];
+      for (const g of added) {
+        if (seen.has(g.id)) continue;
+        seen.add(g.id);
+        next.push(g);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleDroppedPaths = useCallback(
+    async (paths: string[]) => {
+      if (paths.length === 0) return;
+
+      const toAdd: NewGame[] = [];
+      const seen = new Set<string>();
+      let skipped = 0;
+      let invalid = 0;
+
+      for (const rawPath of paths) {
+        let resolved = rawPath;
+        if (rawPath.toLowerCase().endsWith(".lnk")) {
+          try {
+            resolved = await gamesApi.resolveShortcutTarget(rawPath);
+          } catch (e) {
+            console.error("Failed to resolve shortcut:", e);
+            invalid += 1;
+            continue;
+          }
+        }
+
+        const lowerResolved = resolved.toLowerCase();
+        if (!lowerResolved.endsWith(".exe")) {
+          invalid += 1;
+          continue;
+        }
+
+        if (seen.has(lowerResolved)) {
+          continue;
+        }
+        seen.add(lowerResolved);
+
+        const exists = await gamesApi.existsByPath(resolved).catch(() => false);
+        if (exists) {
+          skipped += 1;
+          continue;
+        }
+
+        const exeName = fileNameFromPath(resolved);
+        const name = cleanNameFromFile(exeName);
+        toAdd.push({ name, exe_path: resolved, exe_name: exeName });
+      }
+
+      if (toAdd.length > 0) {
+        try {
+          const added = await addGames(toAdd);
+          enqueueMetadata(added);
+
+          const extra: string[] = [];
+          if (skipped > 0) {
+            extra.push(
+              `\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043e: ${skipped}`,
+            );
+          }
+          if (invalid > 0) {
+            extra.push(
+              `\u041d\u0435 \u043f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0435\u0442\u0441\u044f: ${invalid}`,
+            );
+          }
+
+          notify({
+            tone: "success",
+            title: `\u0414\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u043e ${added.length}`,
+            description: extra.length ? extra.join(" | ") : undefined,
+          });
+        } catch (e) {
+          console.error("Failed to add dropped games:", e);
+          notify({
+            tone: "error",
+            title:
+              "\u041d\u0435 \u0443\u0434\u0430\u043b\u043e\u0441\u044c \u0434\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0438\u0433\u0440\u0443",
+            description:
+              "\u041f\u0440\u043e\u0432\u0435\u0440\u044c\u0442\u0435 \u043f\u0443\u0442\u044c \u043a \u0444\u0430\u0439\u043b\u0443.",
+          });
+        }
+      } else {
+        notify({
+          tone: "warning",
+          title:
+            "\u0424\u0430\u0439\u043b\u044b \u043d\u0435 \u0434\u043e\u0431\u0430\u0432\u043b\u0435\u043d\u044b",
+          description:
+            "\u041f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u044e\u0442\u0441\u044f .exe \u0438 .lnk.",
+        });
+      }
+    },
+    [addGames, enqueueMetadata, notify],
+  );
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+
+    const setup = async () => {
+      unlisten = await getCurrentWindow().onDragDropEvent((event) => {
+        const payload = event.payload;
+        if (payload.type === "enter") {
+          const supported = hasSupportedDropPaths(payload.paths ?? []);
+          dragHasSupportedRef.current = supported;
+          setDropActive(supported);
+          return;
+        }
+
+        if (payload.type === "over") {
+          if (dragHasSupportedRef.current) {
+            setDropActive(true);
+          }
+          return;
+        }
+
+        if (payload.type === "drop") {
+          setDropActive(false);
+          dragHasSupportedRef.current = false;
+          void handleDroppedPaths(payload.paths ?? []);
+          return;
+        }
+
+        dragHasSupportedRef.current = false;
+        setDropActive(false);
+      });
+    };
+
+    void setup();
+
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [handleDroppedPaths]);
 
   const filteredGames = useMemo(() => {
     let result = (showFavoritesOnly ? favorites : games).slice();
@@ -69,138 +240,188 @@ export default function Library() {
     });
   }, [games, favorites, searchQuery, sortBy, showFavoritesOnly]);
 
+  const currentMetadataGame = metadataQueue[0] ?? null;
+
   if (loading) {
     return (
-      <div className="p-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-10 bg-muted rounded w-64" />
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {[...Array(8)].map((_, i) => (
-              <div key={i} className="aspect-[3/4] bg-muted rounded-lg" />
-            ))}
+      <>
+        <div className="p-6">
+          <div className="animate-pulse space-y-4">
+            <div className="h-10 bg-muted rounded w-64" />
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {[...Array(8)].map((_, i) => (
+                <div key={i} className="aspect-[3/4] bg-muted rounded-lg" />
+              ))}
+            </div>
           </div>
         </div>
-      </div>
+
+        {currentMetadataGame && (
+          <RawgMetadataPrompt
+            game={currentMetadataGame}
+            remaining={metadataQueue.length}
+            onNext={() => setMetadataQueue((prev) => prev.slice(1))}
+            onSkipAll={() => setMetadataQueue([])}
+            onAfterApply={refreshGames}
+          />
+        )}
+      </>
     );
   }
 
   return (
-    <div className="p-6 space-y-6">
-      {/* Header */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">Моя библиотека</h1>
-          <p className="text-muted-foreground text-sm">
-            {games.length} {games.length === 1 ? "игра" : "игр"} в библиотеке
-          </p>
-        </div>
+    <>
+      <div className="p-6 space-y-6">
+        {/* Header */}
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              Моя библиотека
+            </h1>
+            <p className="text-muted-foreground text-sm">
+              {games.length} {games.length === 1 ? "игра" : "игр"} в библиотеке
+            </p>
+          </div>
 
-        {/* Search and filters */}
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1 md:flex-none">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-            <Input
-              placeholder="Поиск игр..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-9 w-full md:w-64"
-            />
+          {/* Search and filters */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex-1 md:flex-none">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <Input
+                placeholder="Поиск игр..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 w-full md:w-64"
+              />
+            </div>
           </div>
         </div>
+
+        {/* Toolbar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-border">
+          <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-2 sm:pb-0">
+            <Button
+              variant={showFavoritesOnly ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+              className="gap-2 flex-shrink-0"
+            >
+              <Star
+                className={cn(
+                  "w-4 h-4",
+                  showFavoritesOnly && "fill-yellow-500 text-yellow-500",
+                )}
+              />
+              Избранное
+            </Button>
+
+            <div className="h-4 w-px bg-border flex-shrink-0" />
+
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as SortBy)}
+              className="text-sm bg-transparent border-none focus:outline-none text-muted-foreground cursor-pointer flex-shrink-0"
+            >
+              <option value="name">По имени</option>
+              <option value="lastPlayed">Недавно запущенные</option>
+              <option value="dateAdded">Недавно добавленные</option>
+              <option value="playCount">Популярные</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1 justify-end">
+            <Button
+              variant={viewMode === "grid" ? "secondary" : "ghost"}
+              size="icon"
+              className="w-8 h-8"
+              onClick={() => setViewMode("grid")}
+            >
+              <Grid3X3 className="w-4 h-4" />
+            </Button>
+            <Button
+              variant={viewMode === "list" ? "secondary" : "ghost"}
+              size="icon"
+              className="w-8 h-8"
+              onClick={() => setViewMode("list")}
+            >
+              <List className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+
+        {/* Empty state */}
+        {filteredGames.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-16 text-center">
+            <Gamepad2 className="w-12 h-12 text-muted-foreground mb-4" />
+            {games.length === 0 ? (
+              <>
+                <h3 className="text-lg font-medium mb-2">Нет игр</h3>
+                <p className="text-muted-foreground mb-4">
+                  Просканируйте папку, чтобы добавить игры
+                </p>
+                <Link to="/scan">
+                  <Button>Сканировать</Button>
+                </Link>
+              </>
+            ) : (
+              <>
+                <h3 className="text-lg font-medium mb-2">Игры не найдены</h3>
+                <p className="text-muted-foreground">
+                  Попробуйте изменить поиск или фильтры
+                </p>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* Game Grid/List */}
+        {viewMode === "grid" ? (
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
+            {filteredGames.map((game) => (
+              <GameCard key={game.id} game={game} />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {filteredGames.map((game) => (
+              <GameListItem key={game.id} game={game} />
+            ))}
+          </div>
+        )}
+
+        {currentMetadataGame && (
+          <RawgMetadataPrompt
+            game={currentMetadataGame}
+            remaining={metadataQueue.length}
+            onNext={() => setMetadataQueue((prev) => prev.slice(1))}
+            onSkipAll={() => setMetadataQueue([])}
+            onAfterApply={refreshGames}
+          />
+        )}
       </div>
 
-      {/* Toolbar */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-2 border-b border-border">
-        <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-2 sm:pb-0">
-          <Button
-            variant={showFavoritesOnly ? "secondary" : "ghost"}
-            size="sm"
-            onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
-            className="gap-2 flex-shrink-0"
-          >
-            <Star
-              className={cn(
-                "w-4 h-4",
-                showFavoritesOnly && "fill-yellow-500 text-yellow-500",
-              )}
-            />
-            Избранное
-          </Button>
-
-          <div className="h-4 w-px bg-border flex-shrink-0" />
-
-          <select
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortBy)}
-            className="text-sm bg-transparent border-none focus:outline-none text-muted-foreground cursor-pointer flex-shrink-0"
-          >
-            <option value="name">По имени</option>
-            <option value="lastPlayed">Недавно запущенные</option>
-            <option value="dateAdded">Недавно добавленные</option>
-            <option value="playCount">Популярные</option>
-          </select>
-        </div>
-
-        <div className="flex items-center gap-1 justify-end">
-          <Button
-            variant={viewMode === "grid" ? "secondary" : "ghost"}
-            size="icon"
-            className="w-8 h-8"
-            onClick={() => setViewMode("grid")}
-          >
-            <Grid3X3 className="w-4 h-4" />
-          </Button>
-          <Button
-            variant={viewMode === "list" ? "secondary" : "ghost"}
-            size="icon"
-            className="w-8 h-8"
-            onClick={() => setViewMode("list")}
-          >
-            <List className="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
-
-      {/* Empty state */}
-      {filteredGames.length === 0 && (
-        <div className="flex flex-col items-center justify-center py-16 text-center">
-          <Gamepad2 className="w-12 h-12 text-muted-foreground mb-4" />
-          {games.length === 0 ? (
-            <>
-              <h3 className="text-lg font-medium mb-2">Нет игр</h3>
-              <p className="text-muted-foreground mb-4">
-                Просканируйте папку, чтобы добавить игры
-              </p>
-              <Link to="/scan">
-                <Button>Сканировать</Button>
-              </Link>
-            </>
-          ) : (
-            <>
-              <h3 className="text-lg font-medium mb-2">Игры не найдены</h3>
-              <p className="text-muted-foreground">
-                Попробуйте изменить поиск или фильтры
-              </p>
-            </>
-          )}
+      {dropActive && (
+        <div className="fixed inset-0 z-50 pointer-events-none">
+          <div className="absolute inset-0 bg-background/40 backdrop-blur-sm" />
+          <div className="absolute inset-3 sm:inset-6 rounded-2xl border-2 border-dashed border-primary/70 shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_30px_80px_rgba(8,12,24,0.55)]">
+            <div className="absolute inset-0 flex items-center justify-center">
+              <div className="bg-card/80 backdrop-blur-xl border border-border/60 rounded-2xl px-6 py-4 text-center shadow-[0_18px_45px_rgba(8,12,24,0.45)]">
+                <div className="text-sm font-semibold text-foreground">
+                  {
+                    "\u041e\u0442\u043f\u0443\u0441\u0442\u0438\u0442\u0435, \u0447\u0442\u043e\u0431\u044b \u0434\u043e\u0431\u0430\u0432\u0438\u0442\u044c \u0438\u0433\u0440\u0443"
+                  }
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {
+                    "\u041f\u043e\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u044e\u0442\u0441\u044f .exe \u0438 .lnk"
+                  }
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
       )}
-
-      {/* Game Grid/List */}
-      {viewMode === "grid" ? (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
-          {filteredGames.map((game) => (
-            <GameCard key={game.id} game={game} />
-          ))}
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {filteredGames.map((game) => (
-            <GameListItem key={game.id} game={game} />
-          ))}
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 
@@ -228,7 +449,9 @@ function GameListItem({ game }: { game: Game }) {
       {/* Info */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <h3 className="font-medium truncate text-sm sm:text-base">{game.name}</h3>
+          <h3 className="font-medium truncate text-sm sm:text-base">
+            {game.name}
+          </h3>
           {game.is_favorite && (
             <Star className="w-3 h-3 sm:w-4 sm:h-4 fill-yellow-500 text-yellow-500 flex-shrink-0" />
           )}
@@ -238,10 +461,10 @@ function GameListItem({ game }: { game: Game }) {
             <span className="truncate">{game.genres.split(",")[0]}</span>
           )}
           {game.total_playtime > 0 && (
-             <span className="flex items-center gap-1">
-               <Clock className="w-3 h-3" />
-               {formatPlaytime(game.total_playtime)}
-             </span>
+            <span className="flex items-center gap-1">
+              <Clock className="w-3 h-3" />
+              {formatPlaytime(game.total_playtime)}
+            </span>
           )}
           {game.last_played && (
             <span className="flex items-center gap-1 hidden sm:flex">

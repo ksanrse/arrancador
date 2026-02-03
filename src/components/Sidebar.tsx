@@ -55,32 +55,6 @@ export function Sidebar() {
         sidebarWidthClass,
       )}
     >
-      {/* Logo */}
-      <div
-        className={cn(
-          "h-14 flex items-center gap-3 border-b border-border/60 px-4",
-          collapsed && "lg:justify-center lg:gap-0 lg:px-2",
-        )}
-      >
-        <div
-          className={cn(
-            "flex h-9 w-9 items-center justify-center rounded-lg bg-sidebar-accent/70 text-sidebar-foreground",
-            "shadow-[0_8px_20px_rgba(8,12,24,0.18)]",
-            collapsed && "shadow-none",
-          )}
-        >
-          <Gamepad2 className="w-5 h-5" />
-        </div>
-        <span
-          className={cn(
-            "font-semibold text-base tracking-tight",
-            collapsed && "lg:sr-only",
-          )}
-        >
-          Arrancador
-        </span>
-      </div>
-
       {/* Navigation */}
       <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto scrollbar-stable">
         {navItems.map(({ title, to, icon: Icon }) => {
